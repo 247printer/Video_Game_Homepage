@@ -24,6 +24,13 @@ export function buildWorld(scene:T.Scene, map:MapId):World {
   }
   const floor=box(0,-.3,0,60,.6,60,dock?"#626c6c":"#a0afb5");
   blocks.pop();floor.receiveShadow=true;
+  const groundCanvas=document.createElement("canvas");groundCanvas.width=256;groundCanvas.height=256;
+  const ctx=groundCanvas.getContext("2d")!;ctx.fillStyle=dock?"#737c7c":"#bbc5c8";ctx.fillRect(0,0,256,256);
+  let seed=73;const random=()=>{seed=(seed*16807)%2147483647;return seed/2147483647;};
+  for(let i=0;i<6500;i++){const v=Math.floor(80+random()*90);ctx.fillStyle=`rgba(${v},${v},${v},.22)`;ctx.fillRect(random()*256,random()*256,random()*3+1,1);}
+  ctx.strokeStyle="#313e3e44";ctx.lineWidth=1;ctx.strokeRect(0,0,256,256);
+  const groundTexture=new T.CanvasTexture(groundCanvas);groundTexture.wrapS=groundTexture.wrapT=T.RepeatWrapping;groundTexture.repeat.set(15,15);groundTexture.colorSpace=T.SRGBColorSpace;
+  floor.material=new T.MeshStandardMaterial({map:groundTexture,roughness:.92});
   box(-30,2,0,1,4,61,"#586767");box(30,2,0,1,4,61,"#586767");box(0,2,-30,60,4,1,"#586767");box(0,2,30,60,4,1,"#586767");
   if(dock){
     function container(x:number,z:number,color:string,rot=false,stack=false){
@@ -34,6 +41,9 @@ export function buildWorld(scene:T.Scene, map:MapId):World {
         else {box(x+i,y,z-2.54,.12,3.02,.09,"#253c42",false);box(x+i,y,z+2.54,.12,3.02,.09,"#253c42",false);}
       }
       if(!rot)sign("NORTH / 07",x,y+.15,z+2.61,4.5);
+      const front=rot?z+5.52:z+2.57;
+      if(rot){for(const dx of [-1.6,1.6]){box(x+dx,y,front,.07,2.9,.1,"#b1b9ad",false);box(x+dx+.18,y-.25,front+.08,.4,.07,.12,"#e0dac3",false);}sign("CARGO",x,y+.65,front+.02,3);}
+      else {box(x,y+1.52,z,w,.08,d+.05,"#9da99b",false);sign("MAX 30.480 KG",x+3,y-1,z+2.62,2,"#dfd7bb");}
     }
     container(-13,-15,"#326f75");container(4,-15,"#a34c41");container(17,-8,"#48778a",true);
     container(-16,2,"#7a893b",true);container(-3,3,"#ad6652");container(13,10,"#376e75");container(-8,19,"#3c6679");
@@ -48,11 +58,27 @@ export function buildWorld(scene:T.Scene, map:MapId):World {
     const water=new T.Mesh(new T.PlaneGeometry(260,260),new T.MeshStandardMaterial({color:"#487f89",roughness:.3,metalness:.35}));water.rotation.x=-Math.PI/2;water.position.set(0,-.8,0);group.add(water);
     for(let i=0;i<8;i++)box(-65+i*18,5,-65,12,10,9,i%2?"#74868b":"#879594",false);
     sign("DOCK 04",0,3.1,-29.42,9,"#d7ef72");
+    for(const [x,z] of [[-24,-8],[24,20],[-20,22]]){
+      for(const dx of [-.8,.8])box(x+dx,.65,z, .11,1.36,2.56,"#4d5c56",false);
+      sign("SUPPLY",x,.85,z+1.3,1.8,"#ece2b7");
+    }
+    for(let i=0;i<7;i++){const z=-22+i*7;box(-29.42,1.4,z,.09,1.2,2.2,i%2?"#dac785":"#3a494a",false);}
+    // Peripheral equipment stays outside the playable boundary.
+    box(36,1.1,13,3,2.2,5,"#d0a348",false);box(36,2.9,13,2.7,.25,3,"#333f3e",false);
+    for(const x of [34.7,37.3])for(const z of [11.4,14.6]){const wheel=cylinder(x,.7,z,.65,.35,"#293231");wheel.rotation.z=Math.PI/2;}
+    box(36,2.2,9.8,.3,4.4,.3,"#526160",false);box(35.4,.3,8.6,.18,.2,2.8,"#526160",false);box(36.6,.3,8.6,.18,.2,2.8,"#526160",false);
+    for(let i=0;i<5;i++){cylinder(-35+i*2.8,.7,16,.6,1.4,i%2?"#b06250":"#536f79");}
+    for(let i=0;i<4;i++){box(-22+i*13,.02,27,5,.03,.14,"#d6d7b3",false);}
   } else {
     function building(x:number,z:number,w:number,d:number,color:string){
       box(x,2.5,z,w,5,d,color);box(x,5.1,z,w+.5,.25,d+.5,"#e5ece8",false);
       box(x,1.2,z+d/2+.02,w,.28,.08,"#2c99ab",false);
       for(let i=-w/2+1.3;i<w/2;i+=2.5)box(x+i,3.2,z+d/2+.06,1.7,1.5,.1,"#375664",false);
+      for(let i=-w/2+1.3;i<w/2;i+=2.5){box(x+i,3.2,z+d/2+.13,.05,1.55,.08,"#abbfc1",false);box(x+i,3.2,z+d/2+.14,1.75,.06,.08,"#abbfc1",false);}
+      box(x,1.35,z+d/2+.09,1.3,2.7,.12,"#344e59",false);box(x+.42,1.4,z+d/2+.2,.08,.26,.06,"#c4d7d9",false);
+      box(x,2.85,z+d/2+.2,1.55,.12,.28,"#dceedd",false);sign("RESEARCH",x,4.5,z+d/2+.11,4,"#e4f0e8");
+      box(x-2,5.6,z,2.2,.9,1.5,"#687e86",false);for(let j=0;j<7;j++)box(x-2,5.65,z-.65+j*.2,2.3,.03,.06,"#cbd9d8",false);
+      cylinder(x+w/2-.5,7,z-d/2+.5,.06,4,"#56737b");box(x+w/2-.5,8,z-d/2+.5,1.5,.04,.04,"#56737b",false);
     }
     building(-17,-15,12,10,"#d2d6d4");building(7,-17,12,8,"#7f9197");building(19,3,10,12,"#c1c8c8");building(-16,10,10,10,"#829ba0");
     box(-2,1.1,-3,7,2.2,2,"#5a6970");box(-2,1.1,9,7,2.2,2,"#5a6970");
@@ -63,6 +89,9 @@ export function buildWorld(scene:T.Scene, map:MapId):World {
     for(let i=0;i<15;i++){const angle=i/15*Math.PI*2,r=75+(i%3)*12;const m=new T.Mesh(new T.ConeGeometry(18+(i%3)*4,24+(i%4)*8,5),mat(i%2?"#899eab":"#a9b8c0"));m.position.set(Math.cos(angle)*r,7,Math.sin(angle)*r);group.add(m);}
     for(let z=-26;z<27;z+=5)box(-7,.018,z,.13,.03,2,"#e7e2b1",false);
     sign("SECTOR B",0,3,-29.42,8,"#7bdae2");
+    for(let i=0;i<9;i++){const x=-27+i*6;box(x,.025,27,1.7,.04,.4,"#eef2e6",false);}
+    for(let i=0;i<10;i++){const x=-42+i*9,z=i%2?-39:40;cylinder(x,3,z,.25,6,"#59695b");for(let j=0;j<3;j++){const pine=new T.Mesh(new T.ConeGeometry(2.8-j*.65,4,7),mat(j%2?"#476c68":"#38675e"));pine.position.set(x,4+j*1.6,z);group.add(pine);}}
+    for(const x of [-27,27]){box(x,1.7,30.6,.2,3.4,.2,"#6d919c",false);box(x,3.4,30.6,1.1,.3,.5,"#cbecef",false);}
   }
   for(const [x,z] of [[-27,-25],[27,25],[-27,25],[27,-25]]){
     cylinder(x,4.5,z,.11,9,"#3d4849");box(x,9,z,1.4,.18,.6,"#e7e6c3",false);
@@ -94,6 +123,12 @@ export function makeWeapon(w:Weapon){
   if(sniper){const scope=new T.Mesh(new T.CylinderGeometry(.061,.052,.34,16),black);scope.rotation.x=Math.PI/2;scope.position.set(0,.18,-.05);g.add(scope);}
   if(shotgun)box(0,-.055,-.45,.14,.12,.22,accent);
   for(let i=0;i<6&&!pistol;i++)box(0,.092,-.3+i*.045,.15,.023,.016,metal);
+  for(const side of [-1,1]){
+    for(let i=0;i<3;i++){const screw=new T.Mesh(new T.CylinderGeometry(.011,.011,.008,8),metal);screw.rotation.z=Math.PI/2;screw.position.set(side*.064,.025,-.13+i*.12);g.add(screw);}
+    if(!pistol)for(let i=0;i<5;i++)box(side*.071,.015,-.44+i*.037,.012,.08,.012,black);
+  }
+  box(0,-.1,.085,.065,.025,.08,metal);box(0,-.115,-.015,.075,.08,.025,black);
+  if(!pistol){box(.07,.045,.045,.015,.045,.1,metal);box(0,.005,.49,.145,.19,.045,black);}
   const glove=new T.MeshStandardMaterial({color:0x424a3b});box(.07,-.23,.13,.16,.17,.24,glove);if(!pistol)box(-.05,-.12,-.35,.17,.14,.22,glove);
   return g;
 }

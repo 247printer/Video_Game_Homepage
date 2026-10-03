@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { Crosshair, Shield, Volume2, Settings2, X, Play, Pause, RotateCcw, LogOut, ArrowUp, RefreshCw, Target, Maximize, Check, Zap } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
@@ -46,7 +47,7 @@ export default function Game({playerName,signOut}:{playerName:string;signOut:str
     {state.phase==="lobby"&&<>
       <div className="lobby-shade" />
       <header className="topbar">
-        <a className="brand" href="/" aria-label="Strikepoint"><Zap size={26} fill="currentColor"/><span>STRIKEPOINT<span className="brand-sub">TACTICAL BOT ARENA</span></span></a>
+        <Link className="brand" href="/" aria-label="Zur Spielhalle"><Zap size={26} fill="currentColor"/><span>STRIKEPOINT<span className="brand-sub">247 ARCADE / SPIELHALLE</span></span></Link>
         <div className="top-mode"><span className="active-line"/>LOCAL OPERATIONS <span className="version">01.00</span></div>
         <div className="account"><Shield size={16}/><span>{playerName}</span>{signOut&&<a className="icon-button" href={signOut} target="_top" title="Abmelden"><LogOut size={17}/></a>}</div>
       </header>
