@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
+import Link from "../app-link";
 import { Bike, Gamepad2, Pause, Play, RotateCcw, RefreshCw, Target } from "lucide-react";
 import type { PinkEngine, PedalState } from "@/lib/pink-engine";
 const initial:PedalState={phase:"ready",score:0,time:90,ammo:6,hits:0,shots:0,combo:0,reloading:false,message:""};

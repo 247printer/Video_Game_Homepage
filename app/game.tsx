@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
+import Link from "./app-link";
 import { Crosshair, Shield, Volume2, Settings2, X, Play, Pause, RotateCcw, LogOut, ArrowUp, RefreshCw, Target, Maximize, Check, Zap } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";

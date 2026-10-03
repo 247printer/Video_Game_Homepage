@@ -1,4 +1,4 @@
-import Link from "next/link";
+import Link from "./app-link";
 import { Gamepad2, Play, Shield, LogOut, Crosshair, Bike } from "lucide-react";
 import { getChatGPTUser, requireChatGPTUser, chatGPTSignOutPath } from "./chatgpt-auth";
 export const dynamic = "force-dynamic";
