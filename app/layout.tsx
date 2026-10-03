@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import "./globals.css";
 import RadioPlayer from "./radio";
 import "./arcade.css";
+import "./library.css";
 
 export const metadata: Metadata = {
-  title: "247 ARCADE | STRIKEPOINT & Pink Pedal",
+  title: "Martin's Arcade | STRIKEPOINT & Pink Pedal",
   description: "Deine Spielhalle: STRIKEPOINT, Pink Pedal und Sunshine Live.",
   icons: {
     icon: "/favicon.svg",

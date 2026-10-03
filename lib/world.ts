@@ -3,10 +3,11 @@ import { Octree } from "three/addons/math/Octree.js";
 import PF from "pathfinding";
 import type { MapId, Weapon } from "./arsenal";
 
-export type World = {group:T.Group;octree:Octree;walls:T.Object3D[];grid:PF.Grid;spawns:T.Vector3[]};
+export type World = {group:T.Group;octree:Octree;walls:T.Object3D[];grid:PF.Grid;spawns:T.Vector3[];ladders:{x:number;z:number;top:number;landingZ:number}[]};
 export function buildWorld(scene:T.Scene, map:MapId):World {
   const group=new T.Group(), solid=new T.Group(), walls:T.Object3D[]=[], blocks:{x:number;z:number;w:number;d:number}[]=[];
   const dock=map==="dockyard";
+  const ladders:World["ladders"]=[];
   scene.background=new T.Color(dock?"#b7c8ce":"#c3d4df");
   scene.fog=new T.Fog(dock?"#b7c8ce":"#c3d4df",45,125);
   const mats=new Map<string,T.MeshStandardMaterial>();
@@ -16,6 +17,11 @@ export function buildWorld(scene:T.Scene, map:MapId):World {
     (collision?solid:group).add(m);if(collision){walls.push(m);if(y-h/2<2&&y+h/2>.5)blocks.push({x,z,w,d});}return m;
   }
   function cylinder(x:number,y:number,z:number,r:number,h:number,color:string){const m=new T.Mesh(new T.CylinderGeometry(r,r,h,12),mat(color));m.position.set(x,y,z);m.castShadow=true;group.add(m);return m;}
+  function ladder(x:number,z:number,top:number,landingZ:number){
+    ladders.push({x,z,top,landingZ});
+    for(const dx of [-.45,.45])cylinder(x+dx,top/2,z,.045,top+.8,"#e4bf51");
+    for(let y=.3;y<top+.2;y+=.35)box(x,y,z,.9,.055,.07,"#b8bec0",false);
+  }
   function sign(text:string,x:number,y:number,z:number,w:number,color="#e6eee6",rotation=0){
     const canvas=document.createElement("canvas");canvas.width=512;canvas.height=128;const c=canvas.getContext("2d")!;
     c.fillStyle=color;c.font="bold 76px monospace";c.textAlign="center";c.fillText(text,256,92);
@@ -35,7 +41,7 @@ export function buildWorld(scene:T.Scene, map:MapId):World {
   if(dock){
     function container(x:number,z:number,color:string,rot=false,stack=false){
       const w=rot?5:11,d=rot?11:5,y=stack?4.75:1.6;
-      box(x,y,z,w,3.2,d,color,!stack);
+      box(x,y,z,w,3.2,d,color);
       for(let i=-4;i<=4;i++){
         if(rot){box(x-2.54,y,z+i, .09,3.02,.12,"#253c42",false);box(x+2.54,y,z+i,.09,3.02,.12,"#253c42",false);}
         else {box(x+i,y,z-2.54,.12,3.02,.09,"#253c42",false);box(x+i,y,z+2.54,.12,3.02,.09,"#253c42",false);}
@@ -69,6 +75,23 @@ export function buildWorld(scene:T.Scene, map:MapId):World {
     box(36,2.2,9.8,.3,4.4,.3,"#526160",false);box(35.4,.3,8.6,.18,.2,2.8,"#526160",false);box(36.6,.3,8.6,.18,.2,2.8,"#526160",false);
     for(let i=0;i<5;i++){cylinder(-35+i*2.8,.7,16,.6,1.4,i%2?"#b06250":"#536f79");}
     for(let i=0;i<4;i++){box(-22+i*13,.02,27,5,.03,.14,"#d6d7b3",false);}
+    ladder(-13,-11.85,6.35,-13.5);ladder(-3,6.15,3.2,4.5);ladder(13,13.15,3.2,11.5);
+    // Walkable catwalk connects the two central container roofs.
+    box(4.5,3.04,7.2,2.4,.3,9,"#465959");
+    box(2.8,3.04,4.3,3.5,.3,1.8,"#465959");box(6.6,3.04,9.8,4.2,.3,1.8,"#465959");
+    for(const x of [3.25,5.75]){box(x,4.1,7.2,.07,.08,9,"#e1bd55",false);for(let z=3;z<12;z+=1.4)box(x,3.65,z,.07,1.1,.07,"#e1bd55",false);}
+    for(let i=0;i<16;i++)box(4.5,3.2,3+i*.55,2.3,.02,.045,"#879792",false);
+    for(const [x,z] of [[-22,9],[22,-16],[9,21]]){
+      box(x,.1,z,3,.2,2,"#605c4b",false);
+      for(let i=0;i<3;i++){cylinder(x-1+i,.6,z,.38,1,"#566c6d");cylinder(x-1+i,1.11,z,.4,.045,"#bdac80");}
+    }
+    for(let i=0;i<10;i++){const x=-23+i*5;box(x,.015,-27,2.8,.02,.11,"#d7d6ae",false);box(x,.017,-26.4,.08,.023,1.2,"#d7d6ae",false);}
+    for(const [x,z] of [[-8,-23],[18,22]]){
+      box(x,.45,z,3,.9,1.6,"#c8be99");for(let i=0;i<8;i++)box(x-1.3+i*.38,.46,z+.82,.17,.76,.025,i%2?"#2c3939":"#e2bc48",false);
+    }
+    box(-23,2.2,-17,4,4.4,5,"#c8d0c7");box(-23,4.5,-17,4.4,.2,5.4,"#515e60",false);
+    for(const x of [-24,-22]){box(x,2.7,-14.46,1.5,1.2,.06,"#4b8391",false);box(x,2.7,-14.4,.06,1.2,.06,"#d6d9c2",false);}
+    sign("CONTROL",-23,3.8,-14.4,3,"#dfdfbb");
   } else {
     function building(x:number,z:number,w:number,d:number,color:string){
       box(x,2.5,z,w,5,d,color);box(x,5.1,z,w+.5,.25,d+.5,"#e5ece8",false);
@@ -92,6 +115,26 @@ export function buildWorld(scene:T.Scene, map:MapId):World {
     for(let i=0;i<9;i++){const x=-27+i*6;box(x,.025,27,1.7,.04,.4,"#eef2e6",false);}
     for(let i=0;i<10;i++){const x=-42+i*9,z=i%2?-39:40;cylinder(x,3,z,.25,6,"#59695b");for(let j=0;j<3;j++){const pine=new T.Mesh(new T.ConeGeometry(2.8-j*.65,4,7),mat(j%2?"#476c68":"#38675e"));pine.position.set(x,4+j*1.6,z);group.add(pine);}}
     for(const x of [-27,27]){box(x,1.7,30.6,.2,3.4,.2,"#6d919c",false);box(x,3.4,30.6,1.1,.3,.5,"#cbecef",false);}
+    ladder(-19,-9.35,5,-11.2);ladder(7,-12.35,5,-14);ladder(19,9.65,5,7.5);ladder(-16,15.65,5,13.4);
+    box(-4,4.87,-17,10,.26,2.8,"#637a7c");
+    for(const z of [-18.45,-15.55]){box(-4,6,z,10,.065,.065,"#c7dce1",false);for(let x=-8;x<=0;x+=1.5)box(x,5.5,z,.06,1.05,.06,"#87a2ac",false);}
+    for(const [x,z] of [[19,2],[-16,9]]){
+      for(let i=0;i<3;i++){const panel=box(x-2+i*2,5.5,z,1.7,.09,3,"#294e68",false);panel.rotation.x=.2;for(let j=0;j<5;j++)box(x-2+i*2,5.65,z-1.2+j*.6,1.7,.022,.025,"#9bbac7",false);}
+      cylinder(x+3,5.8,z-3,.36,1.5,"#9aaeb3");
+    }
+    for(const [x,z] of [[-25,-12],[15,-21]]){
+      for(let i=0;i<3;i++){const pipe=cylinder(x+i*.4,.5,z,.12,5,"#8b9ea0");pipe.rotation.x=Math.PI/2;}
+      box(x+.4,.18,z,1.8,.35,5.5,"#5a6c6d",false);
+    }
+    for(let i=0;i<5;i++){box(13,.15+i*.3,14-i*.6,2.2,.3+i*.6,.6,"#aabac0");}
+    box(13,1.5,10.6,2.2,.3,2,"#aabac0");
+    for(let i=0;i<6;i++){box(-27+i*10,.08,28,4,.16,1.6,"#dce3dc",false);}
+  }
+  // Ground-level dressing: drain covers, repair patches, cables and bollards.
+  for(let i=0;i<9;i++){
+    const x=-24+(i%3)*23,z=-22+Math.floor(i/3)*21;
+    box(x,.016,z,1.4,.027,.65,"#303e40",false);for(let j=0;j<8;j++)box(x-.6+j*.17,.035,z,.05,.025,.62,"#8d9c9a",false);
+    cylinder(x+1.1,.45,z,.1,.9,dock?"#c7b557":"#779da7");
   }
   for(const [x,z] of [[-27,-25],[27,25],[-27,25],[27,-25]]){
     cylinder(x,4.5,z,.11,9,"#3d4849");box(x,9,z,1.4,.18,.6,"#e7e6c3",false);
@@ -106,8 +149,8 @@ export function buildWorld(scene:T.Scene, map:MapId):World {
     const wx=x-29.5,wz=z-29.5;
     if(blocks.some(b=>Math.abs(wx-b.x)<b.w/2+.7&&Math.abs(wz-b.z)<b.d/2+.7))grid.setWalkableAt(x,z,false);
   }
-  const spawns=[[-23,23],[23,-25],[23,23],[-24,-25],[1,24],[-25,0],[25,0],[0,-25]].map(([x,z])=>new T.Vector3(x,0,z));
-  return {group,octree,walls,grid,spawns};
+  const spawns=[[-23,23],[23,-25],[23,23],[-24,-25],[1,24],[-27,0],[25,0],[0,-25]].map(([x,z])=>new T.Vector3(x,0,z));
+  return {group,octree,walls,grid,spawns,ladders};
 }
 
 export function makeWeapon(w:Weapon){
@@ -115,6 +158,12 @@ export function makeWeapon(w:Weapon){
   const accent=new T.MeshStandardMaterial({color:["ak47","mp44","rpd","dragunov"].includes(w.id)?0x7f5034:0x647366,roughness:.65});
   const pistol=w.category==="Pistolen",sniper=w.category==="Scharfschuetzen",smg=w.category==="Maschinenpistolen",mg=w.category==="Leichte MGs",shotgun=w.category==="Schrotflinten";
   function box(x:number,y:number,z:number,a:number,b:number,c:number,m:T.Material){const mesh=new T.Mesh(new T.BoxGeometry(a,b,c),m);mesh.position.set(x,y,z);g.add(mesh);return mesh;}
+  if(w.id==="rpg"){
+    const tube=new T.Mesh(new T.CylinderGeometry(.085,.085,1.1,18),accent);tube.rotation.x=Math.PI/2;tube.position.z=-.2;g.add(tube);
+    const warhead=new T.Mesh(new T.ConeGeometry(.14,.4,16),metal);warhead.rotation.x=-Math.PI/2;warhead.position.z=-.92;g.add(warhead);
+    for(const z of [-.62,.24]){const rim=new T.Mesh(new T.TorusGeometry(.09,.018,8,18),black);rim.position.z=z;g.add(rim);}
+    box(0,-.16,.05,.09,.24,.12,black);box(0,.13,-.3,.04,.18,.035,black);box(.06,-.22,.11,.15,.17,.2,accent);return g;
+  }
   box(0,0,0,.12,pistol?.12:.16,pistol?.28:.48,black);
   box(0,-.15,pistol?.04:.1,.095,.23,.12,accent).rotation.x=-.23;
   if(!pistol){box(0,-.17,-.11,mg?.23:.08,mg?.2:.27,.17,mg?accent:black).rotation.x=.15;box(0,.005,.35,.12,.14,.3,accent);box(0,.01,-.34,.13,.14,smg?.16:.35,accent);}
@@ -138,7 +187,7 @@ export function makeBot(index:number){
   function part(w:number,h:number,d:number,x:number,y:number,z:number,mat:T.Material){const m=new T.Mesh(new T.BoxGeometry(w,h,d),mat);m.position.set(x,y,z);m.castShadow=true;g.add(m);return m;}
   part(.54,.7,.32,0,1.06,0,suit);part(.57,.45,.13,0,1.16,.21,armor);
   const head=part(.34,.36,.34,0,1.63,0,armor);head.userData.head=true;
-  part(.3,.08,.06,0,1.64,.19,new T.MeshStandardMaterial({color:0xf38c79,emissive:0x6b261f}));
+  part(.3,.08,.06,0,1.64,.19,new T.MeshStandardMaterial({color:0xf38c79,emissive:0x6b261f})).userData.head=true;
   const left=part(.2,.69,.24,-.16,.39,0,suit),right=part(.2,.69,.24,.16,.39,0,suit);
   part(.18,.5,.22,-.38,1.08,.1,suit).rotation.x=-.7;part(.18,.5,.22,.38,1.08,.1,suit).rotation.x=-.7;
   part(.13,.13,.7,.19,1.18,.48,armor);

@@ -1,4 +1,4 @@
-export type Category = "Sturmgewehre" | "Maschinenpistolen" | "Leichte MGs" | "Schrotflinten" | "Scharfschuetzen" | "Pistolen";
+export type Category = "Sturmgewehre" | "Maschinenpistolen" | "Leichte MGs" | "Schrotflinten" | "Scharfschuetzen" | "Pistolen" | "Raketenwerfer";
 export type Weapon = { id: string; name: string; category: Category; damage: number; rpm: number; mag: number; reload: number; spread: number; mode: "auto" | "semi" | "burst" | "bolt"; pellets?: number; range: number };
 const w = (id: string, name: string, category: Category, damage: number, rpm: number, mag: number, reload: number, spread: number, mode: Weapon["mode"] = "auto", range = 60, pellets = 1): Weapon => ({id,name,category,damage,rpm,mag,reload,spread,mode,range,pellets});
 export const weapons: Weapon[] = [
@@ -28,6 +28,7 @@ export const weapons: Weapon[] = [
   w("m9","M9","Pistolen",30,450,15,1.2,.024,"semi",30),
   w("m1911","M1911 .45","Pistolen",40,350,8,1.3,.024,"semi",32),
   w("deagle","Desert Eagle","Pistolen",60,260,7,1.7,.03,"semi",45),
+  w("rpg","RPG-7","Raketenwerfer",200,45,1,0,0,"semi",150),
 ];
 export const categories = [...new Set(weapons.map(w=>w.category))];
 export const maps = [
@@ -36,4 +37,4 @@ export const maps = [
 ] as const;
 export type MapId = typeof maps[number]["id"];
 export type MatchConfig = {map:MapId; weapon:string; sidearm:string; difficulty:"recruit"|"regular"|"veteran"; sensitivity:number; volume:number};
-export type GameState = {phase:"lobby"|"playing"|"paused"|"dead"|"finished";health:number;ammo:number;reserve:number;kills:number;deaths:number;time:number;weapon:string;reloading:boolean;reloadProgress:number;hit:boolean;hurt:boolean;notice:string;streak:number;score:number;grenades:number;aiming:boolean;radar:{x:number;z:number;enemy:boolean}[];yaw:number};
+export type GameState = {phase:"lobby"|"playing"|"paused"|"dead"|"finished";health:number;ammo:number;reserve:number;kills:number;deaths:number;time:number;weapon:string;reloading:boolean;reloadProgress:number;hit:boolean;hurt:boolean;notice:string;streak:number;score:number;grenades:number;aiming:boolean;radar:{x:number;z:number;enemy:boolean}[];yaw:number;flying:boolean;c4:number;altitude:number};

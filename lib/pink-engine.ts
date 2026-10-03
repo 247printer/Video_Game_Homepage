@@ -1,7 +1,7 @@
 import * as T from "three";
 
-export type PedalState={phase:"ready"|"playing"|"paused"|"finished";score:number;time:number;ammo:number;hits:number;shots:number;combo:number;reloading:boolean;message:string};
-export const pedalInitial:PedalState={phase:"ready",score:0,time:90,ammo:6,hits:0,shots:0,combo:0,reloading:false,message:""};
+export type PedalState={phase:"ready"|"playing"|"paused"|"finished";score:number;time:number;ammo:number;hits:number;shots:number;combo:number;reloading:boolean;message:string;weapon:"paintball"|"schnitzel";voices:boolean;quote:string};
+export const pedalInitial:PedalState={phase:"ready",score:0,time:90,ammo:6,hits:0,shots:0,combo:0,reloading:false,message:"",weapon:"schnitzel",voices:true,quote:""};
 export function disposeScene(root:T.Object3D){root.traverse(o=>{if(o instanceof T.Mesh||o instanceof T.Line){o.geometry.dispose();const mats=Array.isArray(o.material)?o.material:[o.material];mats.forEach(m=>{if("map" in m)(m.map as T.Texture|null)?.dispose();m.dispose();});}});root.removeFromParent();}
 function material(color:number){return new T.MeshStandardMaterial({color,roughness:.8});}
 function box(parent:T.Object3D,x:number,y:number,z:number,w:number,h:number,d:number,color:number){const m=new T.Mesh(new T.BoxGeometry(w,h,d),material(color));m.position.set(x,y,z);m.castShadow=true;m.receiveShadow=true;parent.add(m);return m;}
@@ -65,9 +65,16 @@ export function buildPark(scene:T.Scene){
 
 type Rider=ReturnType<typeof makeCyclist>&{lane:number;speed:number;direction:number;active:boolean;returnAt:number;points:number;spin:number};
 type Burst={group:T.Group;age:number;velocities:T.Vector3[]};
+type SchnitzelFlight={group:T.Group;from:T.Vector3;to:T.Vector3;age:number;rider:Rider|null};
+function makeSchnitzel(){
+ const group=new T.Group();const crust=ball(group,0,0,0,.4,0xd49637,1.4,.8,.16);crust.rotation.z=.2;
+ for(let i=0;i<24;i++){const a=i*2.4,r=.1+((i*7)%11)/30;ball(group,Math.cos(a)*r*1.3,Math.sin(a)*r*.8,.055,.027,i%2?0xf5ce70:0x9e6926);}
+ const lemon=new T.Mesh(new T.CylinderGeometry(.13,.13,.04,12,1,false,0,Math.PI),material(0xf4dc58));lemon.rotation.x=Math.PI/2;lemon.position.set(.23,.19,.07);group.add(lemon);return group;
+}
 export class PinkEngine {
  renderer:T.WebGLRenderer;scene=new T.Scene();camera=new T.PerspectiveCamera(44,1,.1,100);state={...pedalInitial};riders:Rider[]=[];
- private root:T.Group;private observer:ResizeObserver;private frame=0;private last=0;private clock=0;private accumulator=0;private reloadAt=0;private noteUntil=0;private lastShot=-1;private bursts:Burst[]=[];private abort=new AbortController();private audio:AudioContext|null=null;
+  private root:T.Group;private observer:ResizeObserver;private frame=0;private last=0;private clock=0;private accumulator=0;private reloadAt=0;private noteUntil=0;private lastShot=-1;private bursts:Burst[]=[];private abort=new AbortController();private audio:AudioContext|null=null;
+ private flights:SchnitzelFlight[]=[];private quoteUntil=0;private voiceReady=0;private cryReady=0;
  constructor(private host:HTMLElement,private onState:(state:PedalState)=>void){
    this.renderer=new T.WebGLRenderer({antialias:true,alpha:false});this.renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));this.renderer.toneMapping=T.ACESFilmicToneMapping;this.renderer.toneMappingExposure=1.15;host.appendChild(this.renderer.domElement);this.renderer.domElement.setAttribute("aria-label","Pink Pedal Spielfeld");
    this.root=buildPark(this.scene);this.camera.position.set(0,9,23);this.camera.lookAt(0,1.8,0);
@@ -80,30 +87,58 @@ export class PinkEngine {
    this.frame=requestAnimationFrame(t=>this.tick(t));
  }
  private resize(){this.camera.aspect=this.host.clientWidth/this.host.clientHeight;this.camera.fov=this.camera.aspect<.8?58:44;this.camera.updateProjectionMatrix();this.renderer.setSize(this.host.clientWidth,this.host.clientHeight);}
- start(){this.state={...pedalInitial,phase:"playing"};this.clock=0;this.reloadAt=0;this.noteUntil=0;this.lastShot=-1;this.riders.forEach((r,i)=>{r.active=true;r.group.visible=true;r.group.position.x=-12+i*4;r.speed=2+i*.28;r.returnAt=0;});this.emit();this.tone(520,.08);}
- pause(){if(this.state.phase!=="playing")return;this.state.phase="paused";this.emit();}
+ start(){const {weapon,voices}=this.state;this.clearFlights();this.bursts.forEach(b=>disposeScene(b.group));this.bursts=[];this.state={...pedalInitial,weapon,voices,phase:"playing"};this.clock=0;this.reloadAt=0;this.noteUntil=0;this.quoteUntil=0;this.voiceReady=0;this.cryReady=0;this.lastShot=-1;this.riders.forEach((r,i)=>{r.active=true;r.group.visible=true;r.group.position.x=-12+i*4;r.speed=2+i*.28;r.returnAt=0;});this.emit();this.tone(520,.08);}
+ pause(){if(this.state.phase!=="playing")return;this.state.phase="paused";this.stopVoice();this.emit();}
  resume(){if(this.state.phase!=="paused")return;this.state.phase="playing";this.emit();}
- reload(){if(this.state.phase!=="playing"||this.reloadAt||this.state.ammo===6)return;this.reloadAt=this.clock+1.1;this.state.reloading=true;this.state.message="NACHLADEN";this.noteUntil=this.reloadAt;this.tone(220,.12);this.emit();}
+ selectWeapon(weapon:PedalState["weapon"]){this.state.weapon=weapon;this.state.ammo=6;this.reloadAt=0;this.state.reloading=false;this.state.message="";this.emit();}
+ toggleVoices(){this.state.voices=!this.state.voices;if(!this.state.voices)this.stopVoice();this.emit();}
+ private stopVoice(){if(typeof speechSynthesis!=="undefined")speechSynthesis.cancel();}
+ reload(){if(this.state.weapon==="schnitzel"||this.state.phase!=="playing"||this.reloadAt||this.state.ammo===6)return;this.reloadAt=this.clock+1.1;this.state.reloading=true;this.state.message="NACHLADEN";this.noteUntil=this.reloadAt;this.tone(220,.12);this.emit();}
  shoot(x:number,y:number){
-   if(this.state.phase!=="playing"||this.reloadAt||this.clock-this.lastShot<.14)return;
-   if(!this.state.ammo){this.reload();return;}this.lastShot=this.clock;this.state.ammo--;this.state.shots++;
+   if(this.state.phase!=="playing"||this.reloadAt||this.clock-this.lastShot<(this.state.weapon==="schnitzel"?.32:.14))return;
+   if(this.state.weapon==="paintball"&&!this.state.ammo){this.reload();return;}this.lastShot=this.clock;if(this.state.weapon==="paintball")this.state.ammo--;this.state.shots++;
    const rect=this.renderer.domElement.getBoundingClientRect(),point=new T.Vector2((x-rect.left)/rect.width*2-1,-(y-rect.top)/rect.height*2+1),ray=new T.Raycaster();ray.setFromCamera(point,this.camera);this.scene.updateMatrixWorld(true);
    const hit=ray.intersectObjects(this.riders.filter(r=>r.active).map(r=>r.group),true)[0];
-   if(hit){const rider=this.riders[hit.object.userData.rider];rider.active=false;rider.group.visible=false;rider.returnAt=this.clock+.9+Math.random()*.8;this.state.hits++;this.state.combo++;const multiplier=Math.min(4,1+Math.floor((this.state.combo-1)/3));const points=rider.points*multiplier;this.state.score+=points;this.state.message=`+${points}${multiplier>1?` / COMBO x${multiplier}`:""}`;this.noteUntil=this.clock+.8;this.burst(hit.point);this.tone(650+this.state.combo*40,.1);}
-   else {this.state.combo=0;this.state.message="DANEBEN";this.noteUntil=this.clock+.4;this.tone(100,.05);}
+   if(this.state.weapon==="schnitzel"){
+     const rider=hit?this.riders[hit.object.userData.rider]:null,from=this.camera.position.clone().add(new T.Vector3(.5,-.8,-1)),to=hit?hit.point.clone():ray.ray.at(28,new T.Vector3());
+     if(rider)to.x+=rider.speed*rider.direction*.38;
+     const group=makeSchnitzel();group.position.copy(from);this.scene.add(group);this.flights.push({group,from,to,age:0,rider});this.tone(270,.09);
+   }else if(hit)this.hitRider(this.riders[hit.object.userData.rider],hit.point,false);
+   else this.miss();
    if(!this.state.ammo)this.reload();this.emit();
  }
+ private miss(){this.state.combo=0;this.state.message="DANEBEN";this.noteUntil=this.clock+.4;this.tone(100,.05);}
+ private hitRider(rider:Rider,point:T.Vector3,schnitzel:boolean){
+   if(!rider.active){this.miss();return;}rider.active=false;rider.group.visible=false;rider.returnAt=this.clock+1.5;
+   this.state.hits++;this.state.combo++;const multiplier=Math.min(4,1+Math.floor((this.state.combo-1)/3)),points=rider.points*multiplier;
+   this.state.score+=points;this.state.message=`+${points}${multiplier>1?` / COMBO x${multiplier}`:""}`;this.noteUntil=this.clock+.8;this.burst(point);this.tone(650+this.state.combo*40,.1);this.react(schnitzel);
+ }
+ private react(schnitzel:boolean){
+   const phrases=schnitzel?["Heast, des Schnitzel!","Oida, spinnst?","Sakra, meine Panier!","Geh scheissn!"]:["Oida, spinnst?","Bist du deppert!","Heast, geh scheissn!","Sakra, ned scho wieder!"];
+   const phrase=phrases[(this.state.hits-1)%phrases.length];this.state.quote=phrase;this.quoteUntil=this.clock+2;
+   if(!this.state.voices)return;
+   // A short synthesized cartoon yelp also works on devices without TTS voices.
+   if(this.clock>=this.cryReady){this.cryReady=this.clock+.55;try{this.audio??=new AudioContext();void this.audio.resume();const osc=this.audio.createOscillator(),gain=this.audio.createGain();osc.type="sawtooth";const now=this.audio.currentTime;osc.frequency.setValueAtTime(650,now);osc.frequency.exponentialRampToValueAtTime(1050,now+.08);osc.frequency.exponentialRampToValueAtTime(280,now+.34);gain.gain.setValueAtTime(.025,now);gain.gain.exponentialRampToValueAtTime(.001,now+.38);osc.connect(gain);gain.connect(this.audio.destination);osc.start();osc.stop(now+.4);}catch{}}
+   if(typeof speechSynthesis==="undefined"||this.clock<this.voiceReady)return;
+   this.voiceReady=this.clock+1.7;
+   try{this.stopVoice();const utterance=new SpeechSynthesisUtterance(phrase);utterance.lang="de-AT";
+     const voices=speechSynthesis.getVoices();utterance.voice=voices.find(v=>v.lang.toLowerCase()==="de-at")??voices.find(v=>v.lang.startsWith("de"))??null;
+     utterance.rate=1.12;utterance.pitch=1.25;utterance.volume=.65;speechSynthesis.speak(utterance);
+   }catch{/* Captions and the Web Audio yelp remain available. */}
+ }
+ private clearFlights(){this.flights.forEach(f=>disposeScene(f.group));this.flights=[];}
  private burst(at:T.Vector3){const group=new T.Group(),velocities:T.Vector3[]=[];for(let i=0;i<14;i++){const m=new T.Mesh(new T.BoxGeometry(.13,.13,.06),material([0xff64ac,0xffec7f,0x65d9d1][i%3]));group.add(m);velocities.push(v((Math.random()-.5)*6,2+Math.random()*4,(Math.random()-.5)*3));}group.position.copy(at);this.scene.add(group);this.bursts.push({group,age:0,velocities});}
  private tone(hz:number,duration:number){try{this.audio??=new AudioContext();void this.audio.resume();const osc=this.audio.createOscillator(),gain=this.audio.createGain();osc.type="sine";osc.frequency.setValueAtTime(hz,this.audio.currentTime);gain.gain.setValueAtTime(.08,this.audio.currentTime);gain.gain.exponentialRampToValueAtTime(.001,this.audio.currentTime+duration);osc.connect(gain);gain.connect(this.audio.destination);osc.start();osc.stop(this.audio.currentTime+duration);}catch{}}
  private tick(now:number){
    this.frame=requestAnimationFrame(t=>this.tick(t));const dt=Math.min(.15,(now-this.last)/1000||.016);this.last=now;
    if(this.state.phase==="playing"||this.state.phase==="ready"){
-     if(this.state.phase==="playing"){this.clock+=dt;this.state.time=Math.max(0,90-this.clock);if(!this.state.time){this.state.phase="finished";this.state.message="";this.state.reloading=false;this.reloadAt=0;this.emit();}if(this.reloadAt&&this.clock>=this.reloadAt){this.reloadAt=0;this.state.ammo=6;this.state.reloading=false;}}
+     if(this.state.phase==="playing"){this.clock+=dt;this.state.time=Math.max(0,90-this.clock);if(!this.state.time){this.state.phase="finished";this.state.message="";this.state.reloading=false;this.reloadAt=0;this.clearFlights();this.stopVoice();this.emit();}if(this.reloadAt&&this.clock>=this.reloadAt){this.reloadAt=0;this.state.ammo=6;this.state.reloading=false;}}
+     for(let i=this.flights.length-1;i>=0;i--){const f=this.flights[i];f.age+=dt;const t=Math.min(1,f.age/.38);f.group.position.lerpVectors(f.from,f.to,t);f.group.position.y+=Math.sin(t*Math.PI)*1.7;f.group.rotation.z+=dt*13;f.group.rotation.y+=dt*6;if(t===1){if(f.rider)this.hitRider(f.rider,f.to,true);else this.miss();disposeScene(f.group);this.flights.splice(i,1);}}
      for(const r of this.riders){if(!r.active){if(this.clock>=r.returnAt){r.active=true;r.group.visible=true;r.group.position.x=-r.direction*18;r.speed=Math.min(5,2+this.clock/40+r.lane*.4);}continue;}r.group.position.x+=r.speed*r.direction*dt;if(Math.abs(r.group.position.x)>19){r.group.position.x=-r.direction*18;}r.spin+=dt*r.speed;for(const wheel of r.wheels)wheel.rotation.z=-r.spin*r.direction;for(let i=0;i<r.legs.length;i++)r.legs[i].rotation.z=Math.sin(r.spin*3+i*Math.PI)*.4;r.body.rotation.z=Math.sin(r.spin*2)*.035;}
      for(let i=this.bursts.length-1;i>=0;i--){const b=this.bursts[i];b.age+=dt;b.group.children.forEach((p,j)=>{b.velocities[j].y-=dt*9;p.position.addScaledVector(b.velocities[j],dt);p.rotation.x+=dt*5;p.rotation.z+=dt*3;});if(b.age>1){disposeScene(b.group);this.bursts.splice(i,1);}}
    }
    this.renderer.render(this.scene,this.camera);this.accumulator+=dt;if(this.accumulator>.09){this.accumulator=0;this.emit();}
  }
- private emit(){this.onState({...this.state,message:this.clock<this.noteUntil?this.state.message:""});}
- destroy(){cancelAnimationFrame(this.frame);this.abort.abort();this.observer.disconnect();disposeScene(this.root);this.riders.forEach(r=>disposeScene(r.group));this.bursts.forEach(b=>disposeScene(b.group));void this.audio?.close();this.renderer.dispose();this.renderer.domElement.remove();}
+ private emit(){this.onState({...this.state,message:this.clock<this.noteUntil?this.state.message:"",quote:this.clock<this.quoteUntil?this.state.quote:""});}
+ destroy(){cancelAnimationFrame(this.frame);this.abort.abort();this.observer.disconnect();this.clearFlights();this.stopVoice();disposeScene(this.root);this.riders.forEach(r=>disposeScene(r.group));this.bursts.forEach(b=>disposeScene(b.group));void this.audio?.close();this.renderer.dispose();this.renderer.domElement.remove();}
 }
