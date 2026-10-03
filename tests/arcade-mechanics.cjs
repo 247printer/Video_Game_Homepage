@@ -8,11 +8,16 @@ const { Capsule } = require('three/addons/math/Capsule.js');
 const { Octree } = require('three/addons/math/Octree.js');
 const { Shooter, initialState } = require('../lib/engine.ts');
 const { weapons } = require('../lib/arsenal.ts');
-const { makeBot, buildWorld } = require('../lib/world.ts');
+const { makeBot, buildWorld, setWorldQuality } = require('../lib/world.ts');
+const { graphicsPresets, isGraphicsQuality, effectiveQuality, graphicsPixelRatio } = require('../lib/graphics-settings.ts');
+const { GraphicsPipeline } = require('../lib/graphics-pipeline.ts');
+const { CombatVisuals } = require('../lib/combat-visuals.ts');
+const { SurfaceMaterials } = require('../lib/surface-materials.ts');
 const { PinkEngine, pedalInitial, makeCyclist } = require('../lib/pink-engine.ts');
 const { ParkCanvasRenderer, createParkRenderer } = require('../lib/park-canvas-renderer.ts');
 const { createShooterRenderer, WebGLUnavailableError } = require('../lib/shooter-renderer.ts');
-global.document = {exitPointerLock(){},createElement:()=>({width:0,height:0,getContext:()=>({fillRect(){},strokeRect(){},fillText(){}})})};
+const drawingContext=()=>new Proxy({createLinearGradient:()=>({addColorStop(){}})}, {get:(target,key)=>target[key]??(()=>{})});
+global.document = {exitPointerLock(){},createElement:()=>({width:0,height:0,getContext:drawingContext})};
 global.requestAnimationFrame = () => 1;
 
 {
@@ -111,4 +116,68 @@ for(const map of ['dockyard','relay']){
   for(const p of world.spawns){const capsule=new Capsule(p.clone().add(new T.Vector3(0,.4,0)),p.clone().add(new T.Vector3(0,1.55,0)),.35);assert.equal(world.octree.capsuleIntersect(capsule),false,`${map}: clear spawn ${p.toArray()}`);}
   for(const l of world.ladders){const end=new T.Vector3(l.x,l.top+1.57,l.landingZ),capsule=new Capsule(end.clone().add(new T.Vector3(0,-1.15,0)),end,.35);assert.equal(world.octree.capsuleIntersect(capsule),false,`${map}: clear ladder landing ${l.x}`);}
   assert.ok(world.ladders.length>=3);console.log(`PASS: ${map} spawn collision and ${world.ladders.length} ladder landings`);
+  const visibleMeshes=()=>{let count=0;world.group.traverseVisible(o=>{if(o instanceof T.Mesh)count++;});return count;};
+  const geometry=world.walls[0].geometry,spawns=world.spawns.map(p=>p.toArray());
+  setWorldQuality(world,'low',1);const low=visibleMeshes();assert.equal(world.sun.castShadow,false);assert.ok(world.details.every(g=>!g.visible));
+  setWorldQuality(world,'medium',4);const medium=visibleMeshes();assert.equal(world.sun.shadow.mapSize.x,1024);assert.equal(world.details[1].visible,false);
+  setWorldQuality(world,'high',8);assert.equal(world.sun.shadow.mapSize.x,2048);assert.ok(world.details.every(g=>g.visible));assert.ok(visibleMeshes()>medium&&medium>low);
+  assert.equal(world.walls[0].geometry,geometry);assert.deepEqual(world.spawns.map(p=>p.toArray()),spawns);
+  assert.ok(world.surfaces.textures.size<60,'shared textures stay bounded');
+  const e=shooter();e.world=world;e.scene=scene;
+  const counts=new Map();for(const tex of world.surfaces.textures)tex.addEventListener('dispose',()=>counts.set(tex,(counts.get(tex)||0)+1));
+  let skyDisposed=0;world.sky.addEventListener('dispose',()=>skyDisposed++);e.disposeWorld();assert.equal(scene.environment,null);assert.equal(skyDisposed,1);assert.ok([...counts.values()].every(count=>count===1));assert.equal(world.surfaces.textures.size,0);
+  console.log(`PASS: ${map} quality details/shadows, unchanged collision, batched scenery, bounded textures and disposal`);
+}
+
+{
+  for(const quality of ['low','medium','high']){
+    assert.ok(isGraphicsQuality(quality));assert.equal(effectiveQuality(quality,true),'low');
+    assert.equal(effectiveQuality(quality,false),quality);
+    for(const [width,height] of [[390,844],[1280,800],[3840,2160],[7680,4320]]){
+      const ratio=graphicsPixelRatio(quality,3,width,height);assert.ok(Number.isFinite(ratio)&&ratio>0);assert.ok(width*height*ratio*ratio<=graphicsPresets[quality].maxPixels+1);
+    }
+  }
+  for(const value of [null,undefined,'ultra','HIGH',{},0])assert.equal(isGraphicsQuality(value),false);
+  const scene=new T.Scene(),fx=new CombatVisuals(scene);fx.update(.016);
+  for(const quality of ['low','medium','high']){
+    fx.setQuality(quality);assert.equal(fx.particles.geometry.drawRange.count,graphicsPresets[quality].particles);assert.equal(fx.weather.geometry.drawRange.count,graphicsPresets[quality].weather);
+    for(let i=0;i<150;i++)fx.impact(new T.Vector3(0,1,0),new T.Vector3(0,1,0),false);
+    fx.explosion(new T.Vector3(0,1,0));fx.muzzle(new T.Vector3(0,1,0),new T.Vector3(0,0,-1));fx.trail(new T.Vector3(),.04);
+    assert.equal(fx.marks.length,48);assert.ok(fx.data.filter(Boolean).length<=graphicsPresets[quality].particles);
+    fx.setMap('relay');fx.resize(800,1);fx.update(.02);assert.ok([...fx.particles.geometry.attributes.position.array].every(Number.isFinite));
+    fx.update(5);assert.equal(fx.data.filter(Boolean).length,0);assert.ok([...fx.particles.geometry.attributes.alpha.array].every(a=>a===0));
+    fx.clear();assert.equal(fx.marks.length,0);
+  }
+  fx.dispose();assert.equal(scene.children.length,0);
+  const surfaces=new SurfaceMaterials(),a=surfaces.get('#445566','metal'),b=surfaces.get('#aabbcc','metal');assert.equal(a.map,b.map);assert.equal(surfaces.textures.size,2);assert.notEqual(a.map.colorSpace,a.bumpMap.colorSpace);surfaces.setAnisotropy(4);assert.equal(a.map.anisotropy,4);surfaces.dispose();assert.equal(surfaces.textures.size,0);
+  console.log('PASS: quality validation, 4K/8K pixel budgets, bounded particle/mark pools, expiration, weather and shared surface cleanup');
+}
+
+{
+  let ratio=1.25,directRenders=0;
+  const renderer={getPixelRatio:()=>ratio,setRenderTarget(){},render(){directRenders++;}},pipeline=new GraphicsPipeline(renderer,new T.Scene(),new T.PerspectiveCamera());
+  pipeline.resize(1280,800);pipeline.setQuality('medium');
+  assert.deepEqual(pipeline.composer.passes.map(p=>p.constructor.name),['RenderPass','UnrealBloomPass','OutputPass','ShaderPass','ShaderPass']);
+  assert.equal(pipeline.composer.renderTarget1.width,1600);assert.equal(pipeline.composer.renderTarget1.texture.type,T.UnsignedByteType);
+  assert.equal(pipeline.aa.uniforms.resolution.value.x,1/1600);
+  const oldTarget=pipeline.composer.renderTarget1;let disposed=0;oldTarget.addEventListener('dispose',()=>disposed++);
+  pipeline.setQuality('high');assert.ok(disposed>=1);
+  assert.deepEqual(pipeline.composer.passes.slice(0,3).map(p=>p.constructor.name),['RenderPass','SSAOPass','UnrealBloomPass']);
+  const ao=pipeline.composer.passes[1];assert.equal(ao.normalRenderTarget.texture.type,T.UnsignedByteType);assert.equal(ao.ssaoRenderTarget.width,1600);
+  ratio=.5;pipeline.resize(3840,2160);assert.equal(pipeline.composer.renderTarget1.width,1920);assert.equal(pipeline.aa.uniforms.resolution.value.x,1/1920);
+  pipeline.composer.render=()=>{throw new Error('unsupported postprocessing');};const warn=console.warn;console.warn=()=>{};
+  try{pipeline.render(.016);pipeline.render(.016);}finally{console.warn=warn;}
+  assert.equal(directRenders,2);assert.equal(pipeline.composer,null);
+  pipeline.setQuality('medium');assert.ok(pipeline.composer);pipeline.setQuality('low');assert.equal(pipeline.composer,null);pipeline.render(.016);assert.equal(directRenders,3);pipeline.dispose();
+  console.log('PASS: real Three.js pass order, byte render targets, resized FXAA, buffer disposal, direct-render fallback and Low bypass');
+}
+
+{
+  const e=shooter();e.host={clientWidth:1280,clientHeight:800};e.world=buildWorld(e.scene,'dockyard');let ratio=1;
+  e.renderer={shadowMap:{enabled:true},setPixelRatio(value){ratio=value;},getPixelRatio(){return ratio;},setSize(){},capabilities:{getMaxAnisotropy:()=>4}};
+  e.visuals=new CombatVisuals(e.scene);e.pipeline=new GraphicsPipeline(e.renderer,e.scene,e.camera);global.devicePixelRatio=2;
+  const health=e.state.health,projectiles=e.projectiles;e.setGraphicsQuality('high');assert.equal(e.graphicsQuality,'high');assert.equal(e.config.graphics,'high');assert.equal(e.state.health,health);assert.equal(e.projectiles,projectiles);assert.equal(e.world.sun.shadow.mapSize.x,2048);
+  e.reducedGraphics=true;e.setGraphicsQuality('high');assert.equal(e.graphicsQuality,'low');assert.equal(e.config.graphics,'high');assert.equal(e.renderer.shadowMap.enabled,false);assert.equal(e.pipeline.composer,null);
+  e.visuals.dispose();e.pipeline.dispose();e.disposeWorld();delete global.devicePixelRatio;
+  console.log('PASS: live quality switch preserves gameplay; reduced contexts enforce Low');
 }

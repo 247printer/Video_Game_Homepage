@@ -1,9 +1,12 @@
 import * as T from "three";
 import { Capsule } from "three/addons/math/Capsule.js";
 import PF from "pathfinding";
-import { buildWorld, makeWeapon, makeBot, type World } from "./world";
+import { buildWorld, setWorldQuality, makeWeapon, makeBot, type World } from "./world";
 import { weapons, type MatchConfig, type GameState, type Weapon, type MapId } from "./arsenal";
 import { createShooterRenderer } from "./shooter-renderer";
+import { effectiveQuality, graphicsPixelRatio, graphicsPresets, type GraphicsQuality } from "./graphics-settings";
+import { GraphicsPipeline } from "./graphics-pipeline";
+import { CombatVisuals } from "./combat-visuals";
 
 export const initialState:GameState={phase:"lobby",health:100,ammo:30,reserve:180,kills:0,deaths:0,time:180,weapon:"m4",reloading:false,reloadProgress:0,hit:false,hurt:false,notice:"",streak:0,score:0,grenades:2,aiming:false,radar:[],yaw:0,flying:false,c4:0,altitude:0};
 type Bot = ReturnType<typeof makeBot> & {hp:number;deadUntil:number;fireAt:number;path:number[][];planAt:number;index:number};
@@ -20,22 +23,41 @@ export class Shooter {
   private projectiles:Projectile[]=[];private charges:T.Mesh[]=[];private grenadeReady=0;private c4Ready=0;
   private mantle:{from:T.Vector3;to:T.Vector3;progress:number}|null=null;private vertical=0;
   private observer:ResizeObserver;private abort=new AbortController();private recoil=0;private touchMove={x:0,y:0};private onState:(s:GameState)=>void;
+  private pipeline?:GraphicsPipeline;private visuals?:CombatVisuals;private reducedGraphics=false;private activeQuality?:GraphicsQuality;private shadowTimer=0;
   constructor(private host:HTMLElement,config:MatchConfig,onState:(s:GameState)=>void){
     this.config=config;this.onState=onState;this.weapon=weapons.find(w=>w.id===config.weapon)!;
     const graphics=createShooterRenderer();this.renderer=graphics.renderer;
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio,graphics.reduced?1:1.5));this.renderer.shadowMap.enabled=!graphics.reduced;this.renderer.shadowMap.type=T.PCFSoftShadowMap;
-    // Map geometry is static; keep its shadow map cached between frames.
+    this.reducedGraphics=graphics.reduced;this.renderer.shadowMap.type=T.PCFSoftShadowMap;
+    // Refresh moving combat shadows at a bounded cadence, not on every frame.
     this.renderer.shadowMap.autoUpdate=false;this.renderer.shadowMap.needsUpdate=true;
-    this.renderer.toneMapping=T.ACESFilmicToneMapping;this.renderer.toneMappingExposure=1.13;host.appendChild(this.renderer.domElement);
+    this.renderer.toneMapping=T.ACESFilmicToneMapping;this.renderer.toneMappingExposure=1.05;host.appendChild(this.renderer.domElement);
     this.renderer.domElement.setAttribute("aria-label","3D-Spielfeld");this.scene.add(this.camera);this.world=buildWorld(this.scene,config.map);
+    this.visuals=new CombatVisuals(this.scene);this.visuals.setMap(config.map);
+    this.pipeline=new GraphicsPipeline(this.renderer,this.scene,this.camera);this.setGraphicsQuality(config.graphics??"medium");
     this.observer=new ResizeObserver(()=>this.resize());this.observer.observe(host);this.resize();this.bind();this.frame=requestAnimationFrame(t=>this.tick(t));
   }
-  private resize(){const w=this.host.clientWidth,h=this.host.clientHeight;this.renderer.setSize(w,h);this.camera.aspect=w/h;this.camera.updateProjectionMatrix();}
-  setMap(map:MapId){if(this.state.phase!=="lobby"||map===this.config.map)return;this.config.map=map;this.disposeWorld();this.world=buildWorld(this.scene,map);this.renderer.shadowMap.needsUpdate=true;}
-  private disposeObject(root:T.Object3D){root.traverse(o=>{if(o instanceof T.Mesh){o.geometry.dispose();const materials=Array.isArray(o.material)?o.material:[o.material];materials.forEach(m=>{if("map" in m)(m.map as T.Texture|null)?.dispose();m.dispose();});}});root.removeFromParent();}
-  private disposeWorld(){this.disposeObject(this.world.group);}
+  get graphicsQuality(){return this.activeQuality??"medium";}
+  setGraphicsQuality(requested:GraphicsQuality){
+    const quality=effectiveQuality(requested,this.reducedGraphics);this.config.graphics=requested;
+    if(quality===this.activeQuality)return;
+    this.activeQuality=quality;const preset=graphicsPresets[quality];
+    this.renderer.setPixelRatio(graphicsPixelRatio(quality,devicePixelRatio));this.renderer.shadowMap.enabled=preset.shadows>0;
+    setWorldQuality(this.world,quality,Math.min(preset.anisotropy,this.renderer.capabilities.getMaxAnisotropy()));
+    this.visuals?.setQuality(quality);
+    try{this.pipeline?.setQuality(quality);}catch(error){console.warn("Graphics effects unavailable; direct rendering enabled.",error);this.pipeline?.dispose();}
+    this.renderer.shadowMap.needsUpdate=true;this.shadowTimer=0;this.resize();
+  }
+  private resize(){const w=Math.max(1,this.host.clientWidth),h=Math.max(1,this.host.clientHeight);this.renderer.setPixelRatio(graphicsPixelRatio(this.graphicsQuality,devicePixelRatio,w,h));this.renderer.setSize(w,h);this.camera.aspect=w/h;this.camera.updateProjectionMatrix();this.pipeline?.resize(w,h);this.visuals?.resize(h,this.renderer.getPixelRatio());}
+  private refreshWorldGraphics(){setWorldQuality(this.world,this.graphicsQuality,Math.min(graphicsPresets[this.graphicsQuality].anisotropy,this.renderer.capabilities.getMaxAnisotropy()));this.visuals?.setMap(this.config.map);this.renderer.shadowMap.needsUpdate=true;}
+  setMap(map:MapId){if(this.state.phase!=="lobby"||map===this.config.map)return;this.config.map=map;this.visuals?.clear();this.disposeWorld();this.world=buildWorld(this.scene,map);this.refreshWorldGraphics();}
+  private disposeObject(root:T.Object3D){
+    const geometries=new Set<T.BufferGeometry>(),materials=new Set<T.Material>(),textures=new Set<T.Texture>();
+    root.traverse(o=>{if(o instanceof T.Mesh||o instanceof T.Line||o instanceof T.Points){geometries.add(o.geometry);for(const m of Array.isArray(o.material)?o.material:[o.material]){if(m.userData.surfaceManaged)continue;materials.add(m);for(const value of Object.values(m))if(value instanceof T.Texture&&!value.userData.surfaceManaged)textures.add(value);}}});
+    geometries.forEach(g=>g.dispose());textures.forEach(t=>t.dispose());materials.forEach(m=>m.dispose());root.userData.surfaces?.dispose();root.removeFromParent();
+  }
+  private disposeWorld(){this.disposeObject(this.world.group);this.world.sun?.shadow.dispose();this.world.sky?.dispose();this.scene.environment=null;this.scene.background=null;}
   start(config:MatchConfig){
-    if(this.config.map!==config.map){this.disposeWorld();this.world=buildWorld(this.scene,config.map);this.renderer.shadowMap.needsUpdate=true;}this.config={...config};
+    if(this.config.map!==config.map){this.disposeWorld();this.world=buildWorld(this.scene,config.map);}this.config={...config};this.setGraphicsQuality(config.graphics??"medium");this.refreshWorldGraphics();
     this.bots.forEach(b=>this.disposeObject(b.group));this.bots=[];
     this.state={...initialState,phase:"playing",weapon:config.weapon};this.elapsed=0;this.lastShot=-10;this.burst=0;this.burstReady=0;this.clearEffects();this.resetSlots();this.spawnPlayer();
     for(let i=0;i<5;i++){const model=makeBot(i);const b:Bot={...model,hp:100,deadUntil:0,fireAt:1+i*.3,path:[],planAt:0,index:i};model.group.traverse(o=>{o.userData.bot=i;});this.scene.add(b.group);this.bots.push(b);this.spawnBot(b);}
@@ -103,12 +125,13 @@ export class Shooter {
       let explode=this.elapsed>=p.expires;
       if(hit){p.mesh.position.copy(hit.point).addScaledVector(hit.face?.normal??new T.Vector3(0,1,0),.16);if(p.kind==="rocket")explode=true;else {p.velocity.reflect(hit.face?.normal??new T.Vector3(0,1,0)).multiplyScalar(.45);}}
       else p.mesh.position.add(delta);
+      if(p.kind==="rocket")this.visuals?.trail(p.mesh.position,dt);
       p.mesh.rotateZ(dt*5);
       if(explode){const at=p.mesh.position.clone();this.disposeObject(p.mesh);this.projectiles.splice(i,1);this.explode(at,p.kind==="rocket"?9:8,p.kind==="rocket"?210:180);}
     }
   }
   private explode(target:T.Vector3,radius=8,power=180){
-    const mesh=new T.Mesh(new T.SphereGeometry(4,16,12),new T.MeshBasicMaterial({color:0xffbd63,transparent:true,opacity:.65,wireframe:true}));mesh.position.copy(target);this.scene.add(mesh);this.effects.push({mesh,until:this.elapsed+.22});
+    this.visuals?.explosion(target);
     for(const b of this.bots){const torso=b.group.position.clone().add(new T.Vector3(0,1.2,0)),distance=torso.distanceTo(target);if(b.hp>0&&distance<radius&&this.lineOfSight(target,torso))this.damageBot(b,power*(1-distance/radius),false);}
     this.sound(65,.4,"sawtooth",.25);
   }
@@ -135,6 +158,7 @@ export class Shooter {
     this.sound(w.category==="Scharfschuetzen"?70:120+Math.random()*80,.08,"sawtooth",.15);
     if(w.id==="rpg"){this.launch("rocket");return;}
     const origin=this.camera.position.clone(),direction=this.camera.getWorldDirection(new T.Vector3());
+    this.camera.updateWorldMatrix(true,true);const muzzle=this.gun.getObjectByName("muzzle")?.getWorldPosition(new T.Vector3())??origin.clone().addScaledVector(direction,.7);this.visuals?.muzzle(muzzle,direction);
     for(let i=0;i<(w.pellets||1);i++){
       const spread=w.spread*(this.aiming?.16:1);const dir=direction.clone().add(new T.Vector3((Math.random()-.5)*spread,(Math.random()-.5)*spread,(Math.random()-.5)*spread)).normalize();
       const ray=new T.Raycaster(origin,dir,0,150);const surfaces=[...this.world.walls,...this.bots.filter(b=>b.hp>0).map(b=>b.group)];const hit=ray.intersectObjects(surfaces,true)[0];
@@ -142,7 +166,8 @@ export class Shooter {
       if(hit&&typeof hit.object.userData.bot==="number"){
         const head=!!hit.object.userData.head;const damage=head?1000:w.damage*Math.max(.45,1-Math.max(0,hit.distance-w.range)/90);this.damageBot(this.bots[hit.object.userData.bot],damage,head);
       }
-      if(i===0)this.tracer(origin.clone().add(new T.Vector3(.1,-.13,0)),end,0xffe5a3);
+      if(hit){const normal=hit.face?.normal.clone().transformDirection(hit.object.matrixWorld)??dir.clone().negate();this.visuals?.impact(hit.point,normal,typeof hit.object.userData.bot==="number");}
+      if(i===0)this.tracer(muzzle,end,0xffe5a3);
     }
   }
   private damageBot(b:Bot,damage:number,head:boolean){if(b.hp<=0)return;b.hp-=damage;this.hitUntil=this.elapsed+.15;if(b.hp<=0){b.group.visible=false;b.deadUntil=this.elapsed+2.8;this.state.kills++;this.state.streak++;this.state.score+=head?150:100;this.notice(head?"HEADSHOT +150":"ELIMINIERUNG +100");this.sound(800,.06,"sine",.07);if(this.state.kills>=25)this.finish();}}
@@ -188,13 +213,14 @@ export class Shooter {
     if(this.reloadEnd&&this.elapsed>=this.reloadEnd){const s=this.slots[this.slot],amount=Math.min(this.weapon.mag-s.ammo,s.reserve);s.ammo+=amount;s.reserve-=amount;this.reloadEnd=0;this.syncAmmo();}
     if(this.elapsed-this.hurtUntil>4&&this.state.health<100)this.state.health=Math.min(100,this.state.health+dt*9);
     this.recoil*=Math.exp(-dt*15);
-    const targetX=this.aiming?0:.28,targetY=this.aiming?-.17:-.26;
+    const gait=move.lengthSq()>.1&&this.grounded?1:0,sway=this.aiming?.18:1;
+    const targetX=(this.aiming?0:.28)+Math.sin(this.elapsed*6)*.012*gait*sway,targetY=(this.aiming?-.17:-.26)+Math.cos(this.elapsed*12)*.009*gait*sway;
     this.gun.position.lerp(new T.Vector3(targetX,targetY-(this.reloadEnd?Math.sin((this.reloadEnd-this.elapsed)/this.weapon.reload*Math.PI)*.24:0),-.47+this.recoil),Math.min(1,dt*12));
-    this.gun.rotation.z=this.reloadEnd?-.45:0;
+    this.gun.rotation.z=this.reloadEnd?-.45:Math.sin(this.elapsed*6)*.014*gait*sway;this.gun.rotation.x=-this.recoil*.6;
     this.camera.fov=T.MathUtils.lerp(this.camera.fov,this.aiming?(this.weapon.category==="Scharfschuetzen"?28:51):72,dt*12);this.camera.updateProjectionMatrix();
   }
   private finish(){this.state.phase="finished";this.shooting=false;this.aiming=false;document.exitPointerLock();this.emit();}
-  private clearEffects(){this.effects.forEach(e=>this.disposeEffect(e));this.effects=[];this.projectiles.forEach(p=>this.disposeObject(p.mesh));this.projectiles=[];this.charges.forEach(c=>this.disposeObject(c));this.charges=[];this.state.c4=0;this.grenadeReady=0;this.c4Ready=0;}
+  private clearEffects(){this.visuals?.clear();this.effects.forEach(e=>this.disposeEffect(e));this.effects=[];this.projectiles.forEach(p=>this.disposeObject(p.mesh));this.projectiles=[];this.charges.forEach(c=>this.disposeObject(c));this.charges=[];this.state.c4=0;this.grenadeReady=0;this.c4Ready=0;}
   private disposeEffect(e:Effect){e.mesh.removeFromParent();if(e.mesh instanceof T.Mesh||e.mesh instanceof T.Line){e.mesh.geometry.dispose();(e.mesh.material as T.Material).dispose();}}
   private tick(now:number){
     this.frame=requestAnimationFrame(t=>this.tick(t));const dt=Math.min((now-this.lastTime)/1000||.016,.04);this.lastTime=now;
@@ -206,10 +232,13 @@ export class Shooter {
       if(this.state.time===0)this.finish();
       for(let i=this.effects.length-1;i>=0;i--){const effect=this.effects[i];if(this.elapsed>effect.until){const target=effect.mesh.userData.explode;this.disposeEffect(effect);this.effects.splice(i,1);if(target)this.explode(target);}}
     }
-    this.renderer.render(this.scene,this.camera);if(now-this.lastHud>90){this.lastHud=now;this.emit();}
+    const animating=["lobby","playing","dead"].includes(this.state.phase);
+    if(animating)this.visuals?.update(dt);
+    this.shadowTimer-=dt;if(this.renderer.shadowMap.enabled&&this.shadowTimer<=0&&animating){this.renderer.shadowMap.needsUpdate=true;this.shadowTimer=graphicsPresets[this.graphicsQuality].shadowInterval;}
+    if(this.pipeline)this.pipeline.render(dt);else this.renderer.render(this.scene,this.camera);if(now-this.lastHud>90){this.lastHud=now;this.emit();}
   }
   private notice(text:string){this.state.notice=text;this.noticeUntil=this.elapsed+2;}
   private emit(){this.onState({...this.state,health:Math.ceil(this.state.health),reloading:!!this.reloadEnd,reloadProgress:this.reloadEnd?1-(this.reloadEnd-this.elapsed)/this.weapon.reload:0,hit:this.elapsed<this.hitUntil,hurt:this.elapsed<this.hurtUntil,notice:this.elapsed<this.noticeUntil?this.state.notice:"",aiming:this.aiming,yaw:this.yaw,radar:[{x:this.capsule.end.x,z:this.capsule.end.z,enemy:false},...this.bots.filter(b=>b.hp>0).map(b=>({x:b.group.position.x,z:b.group.position.z,enemy:true}))]});}
   private sound(frequency:number,duration:number,type:OscillatorType,volume:number){try{this.audio??=new AudioContext();void this.audio.resume();const osc=this.audio.createOscillator(),gain=this.audio.createGain();osc.type=type;osc.frequency.setValueAtTime(frequency,this.audio.currentTime);osc.frequency.exponentialRampToValueAtTime(35,this.audio.currentTime+duration);gain.gain.setValueAtTime(volume*this.config.volume,this.audio.currentTime);gain.gain.exponentialRampToValueAtTime(.001,this.audio.currentTime+duration);osc.connect(gain);gain.connect(this.audio.destination);osc.start();osc.stop(this.audio.currentTime+duration);}catch{}}
-  destroy(){cancelAnimationFrame(this.frame);this.abort.abort();this.observer.disconnect();if(document.pointerLockElement===this.renderer.domElement)document.exitPointerLock();this.clearEffects();this.bots.forEach(b=>this.disposeObject(b.group));this.disposeObject(this.gun);this.disposeWorld();void this.audio?.close();this.renderer.domElement.remove();this.renderer.dispose();this.renderer.forceContextLoss();}
+  destroy(){cancelAnimationFrame(this.frame);this.abort.abort();this.observer.disconnect();if(document.pointerLockElement===this.renderer.domElement)document.exitPointerLock();this.clearEffects();this.visuals?.dispose();this.pipeline?.dispose();this.bots.forEach(b=>this.disposeObject(b.group));this.disposeObject(this.gun);this.disposeWorld();void this.audio?.close();this.renderer.domElement.remove();this.renderer.dispose();this.renderer.forceContextLoss();}
 }

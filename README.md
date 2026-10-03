@@ -10,6 +10,24 @@ This is a playable prototype, not an official Call of Duty game. Geometry, sound
 
 The environments include textured paving, container doors and locks, cargo labels, perimeter equipment, research-building doors, window frames, ventilation units, antennas and surrounding trees. Walkable stacked containers, roof bridges, ladders, solar arrays, pipes, drainage grilles, barriers and a control cabin add detail. Climbing reaches nearby ledges and marked ladders; flight stays inside the arena and below 25 meters. Weapon models include additional mechanical detail and a dedicated launcher.
 
+### Graphics
+
+The original graphics now take inspiration from the lighting and surface treatment of the 2007 military shooter era: tiled weathered metal, wood, concrete, asphalt and camouflage fabric with bump detail; environment reflections; clouded skies; warmer harbor light and colder alpine light; muzzle flashes, surface marks, impact particles, smoke, sparks and rocket trails. Rounded weapons include mechanical parts, scope glass, gloves and sleeves; bots have helmets, equipment pouches, knee pads and boots. Dockyard adds wet patches and additional cargo detail; Relay adds reflective windows, snow caps and snowfall. These are original procedural assets, not imported CoD models or a promise of identical AAA graphics.
+
+Choose **Niedrig / Mittel / Hoch** in the loadout or pause-menu Settings. Changes apply without restarting the match; the selected setting is saved on this device.
+
+| Setting | Niedrig | Mittel | Hoch |
+| --- | --- | --- | --- |
+| Internal pixel budget | 1280 x 720 | 1920 x 1080 | 2560 x 1440 |
+| Maximum device pixel ratio | 0.85 | 1.25 | 1.5 |
+| Sun shadows | Off | 1024, 4 updates/sec | 2048, 12.5 updates/sec |
+| Bloom, restrained film contrast, FXAA | Off | On | On |
+| Screen-space ambient occlusion | Off | Off | On |
+| Extra scenery | Base | Additional | Full |
+| Combat particle pool / weather | 160 / 40 | 420 / 150 | 800 / 360 |
+
+The pixel budget caps the total internal render area rather than changing the browser window's dimensions. New touch-device installations default to Low; desktop defaults to Medium. A reduced WebGL context also forces Low and identifies the compatibility mode. Render targets use byte color attachments for broader GPU support. Scenery batches and shared procedural textures limit draw calls and memory. Quality changes and route exit release postprocessing buffers; map changes release surfaces, sky textures and shadow buffers. Missing WebGL 2 still prevents the 3D shooter from starting: a graphics preset cannot replace the required browser capability.
+
 ## PINK PEDAL (`/pink-pedal`)
 
 If WebGL is unavailable, Pink Pedal automatically switches to a Canvas 2D park renderer. The same round, moving targets, weapons, scores and voices remain playable. The start screen also offers a manual 2D mode and a retry button. A lost WebGL context restarts in 2D. STRIKEPOINT still requires WebGL for its first-person 3D world.
@@ -64,7 +82,7 @@ npm start
 | Ascend / descend in flight | Space / Left Ctrl |
 | Pause / release mouse | Escape |
 
-Touch devices have a movement stick, a swipe area on the right and buttons for firing, aiming, jumping, weapon switching, grenades, C4, climbing and flight. Hold the flight arrow buttons to ascend or descend. Desktop with a mouse is recommended. Fullscreen, sensitivity and volume controls are available in Settings. Only sensitivity and volume are saved locally.
+Touch devices have a movement stick, a swipe area on the right and buttons for firing, aiming, jumping, weapon switching, grenades, C4, climbing and flight. Hold the flight arrow buttons to ascend or descend. Desktop with a mouse is recommended. Fullscreen, graphics quality, sensitivity and volume controls are available in Settings. Graphics quality, sensitivity and volume are saved locally.
 
 ## Authentication And Hosting
 
@@ -83,6 +101,8 @@ Development permits a local operator without sign-in. This exception is guarded 
 - `lib/pink-engine.ts`: Three.js park, animated riders, raycast hits, scoring and round lifecycle.
 - `lib/engine.ts`: match state, combat, audio and input lifecycle.
 - `lib/world.ts`: original Three.js scenes and weapon/bot geometry.
+- `lib/graphics-settings.ts`, `lib/graphics-pipeline.ts`: quality budgets and Three.js postprocessing.
+- `lib/surface-materials.ts`, `lib/combat-visuals.ts`: shared procedural surfaces and bounded combat/weather effects.
 - `lib/arsenal.ts`: weapon roster and independent game tuning.
 - `app/page.tsx`, `app/strikepoint/page.tsx`, `app/pink-pedal/page.tsx`: server-side authentication boundaries.
 - Three.js Octree/Capsule handles collision; PathFinding.js A* handles bot navigation.

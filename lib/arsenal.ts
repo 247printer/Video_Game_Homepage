@@ -36,5 +36,5 @@ export const maps = [
   {id:"relay",name:"RELAY",label:"02 / RESEARCH FACILITY",description:"Alpine Forschungsstation",color:"#78dce5"},
 ] as const;
 export type MapId = typeof maps[number]["id"];
-export type MatchConfig = {map:MapId; weapon:string; sidearm:string; difficulty:"recruit"|"regular"|"veteran"; sensitivity:number; volume:number};
+export type MatchConfig = {map:MapId; weapon:string; sidearm:string; difficulty:"recruit"|"regular"|"veteran"; sensitivity:number; volume:number; graphics?:import("./graphics-settings").GraphicsQuality};
 export type GameState = {phase:"lobby"|"playing"|"paused"|"dead"|"finished";health:number;ammo:number;reserve:number;kills:number;deaths:number;time:number;weapon:string;reloading:boolean;reloadProgress:number;hit:boolean;hurt:boolean;notice:string;streak:number;score:number;grenades:number;aiming:boolean;radar:{x:number;z:number;enemy:boolean}[];yaw:number;flying:boolean;c4:number;altitude:number};
