@@ -41,7 +41,7 @@ export class Shooter {
     const quality=effectiveQuality(requested,this.reducedGraphics);this.config.graphics=requested;
     if(quality===this.activeQuality)return;
     this.activeQuality=quality;const preset=graphicsPresets[quality];
-    this.renderer.setPixelRatio(graphicsPixelRatio(quality,devicePixelRatio));this.renderer.shadowMap.enabled=preset.shadows>0;
+    this.renderer.setPixelRatio(graphicsPixelRatio(quality,devicePixelRatio,Math.max(1,this.host.clientWidth),Math.max(1,this.host.clientHeight)));this.renderer.shadowMap.enabled=preset.shadows>0;
     setWorldQuality(this.world,quality,Math.min(preset.anisotropy,this.renderer.capabilities.getMaxAnisotropy()));
     this.visuals?.setQuality(quality);
     try{this.pipeline?.setQuality(quality);}catch(error){console.warn("Graphics effects unavailable; direct rendering enabled.",error);this.pipeline?.dispose();}

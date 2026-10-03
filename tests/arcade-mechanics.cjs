@@ -118,7 +118,8 @@ for(const map of ['dockyard','relay']){
   assert.ok(world.ladders.length>=3);console.log(`PASS: ${map} spawn collision and ${world.ladders.length} ladder landings`);
   const visibleMeshes=()=>{let count=0;world.group.traverseVisible(o=>{if(o instanceof T.Mesh)count++;});return count;};
   const geometry=world.walls[0].geometry,spawns=world.spawns.map(p=>p.toArray());
-  setWorldQuality(world,'low',1);const low=visibleMeshes();assert.equal(world.sun.castShadow,false);assert.ok(world.details.every(g=>!g.visible));
+  world.sun.shadow.map=new T.WebGLRenderTarget(1024,1024);let shadowReleased=0;world.sun.shadow.map.addEventListener('dispose',()=>shadowReleased++);
+  setWorldQuality(world,'low',1);const low=visibleMeshes();assert.equal(world.sun.castShadow,false);assert.equal(shadowReleased,1);assert.equal(world.sun.shadow.map,null);assert.ok(world.details.every(g=>!g.visible));
   setWorldQuality(world,'medium',4);const medium=visibleMeshes();assert.equal(world.sun.shadow.mapSize.x,1024);assert.equal(world.details[1].visible,false);
   setWorldQuality(world,'high',8);assert.equal(world.sun.shadow.mapSize.x,2048);assert.ok(world.details.every(g=>g.visible));assert.ok(visibleMeshes()>medium&&medium>low);
   assert.equal(world.walls[0].geometry,geometry);assert.deepEqual(world.spawns.map(p=>p.toArray()),spawns);
@@ -173,10 +174,10 @@ for(const map of ['dockyard','relay']){
 }
 
 {
-  const e=shooter();e.host={clientWidth:1280,clientHeight:800};e.world=buildWorld(e.scene,'dockyard');let ratio=1;
-  e.renderer={shadowMap:{enabled:true},setPixelRatio(value){ratio=value;},getPixelRatio(){return ratio;},setSize(){},capabilities:{getMaxAnisotropy:()=>4}};
+  const e=shooter();e.host={clientWidth:3840,clientHeight:2160};e.world=buildWorld(e.scene,'dockyard');let ratio=1;const ratios=[];
+  e.renderer={shadowMap:{enabled:true},setPixelRatio(value){ratio=value;ratios.push(value);},getPixelRatio(){return ratio;},setSize(){},capabilities:{getMaxAnisotropy:()=>4}};
   e.visuals=new CombatVisuals(e.scene);e.pipeline=new GraphicsPipeline(e.renderer,e.scene,e.camera);global.devicePixelRatio=2;
-  const health=e.state.health,projectiles=e.projectiles;e.setGraphicsQuality('high');assert.equal(e.graphicsQuality,'high');assert.equal(e.config.graphics,'high');assert.equal(e.state.health,health);assert.equal(e.projectiles,projectiles);assert.equal(e.world.sun.shadow.mapSize.x,2048);
+  const health=e.state.health,projectiles=e.projectiles;e.setGraphicsQuality('high');assert.equal(e.graphicsQuality,'high');assert.equal(e.config.graphics,'high');assert.equal(e.state.health,health);assert.equal(e.projectiles,projectiles);assert.equal(e.world.sun.shadow.mapSize.x,2048);assert.ok(ratios.every(r=>r*r*3840*2160<=graphicsPresets.high.maxPixels+1),'every intermediate allocation respects the pixel budget');
   e.reducedGraphics=true;e.setGraphicsQuality('high');assert.equal(e.graphicsQuality,'low');assert.equal(e.config.graphics,'high');assert.equal(e.renderer.shadowMap.enabled,false);assert.equal(e.pipeline.composer,null);
   e.visuals.dispose();e.pipeline.dispose();e.disposeWorld();delete global.devicePixelRatio;
   console.log('PASS: live quality switch preserves gameplay; reduced contexts enforce Low');

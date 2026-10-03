@@ -13,6 +13,7 @@ export function setWorldQuality(world:World,quality:GraphicsQuality,anisotropy:n
   world.surfaces.setAnisotropy(anisotropy);
   world.details.forEach((g,i)=>g.visible=preset.detail>i);
   world.sun.castShadow=preset.shadows>0;
+  if(!preset.shadows){world.sun.shadow.map?.dispose();world.sun.shadow.map=null;}
   if(world.sun.shadow.mapSize.x!==preset.shadows&&preset.shadows){
     world.sun.shadow.map?.dispose();world.sun.shadow.map=null;
     world.sun.shadow.mapSize.set(preset.shadows,preset.shadows);world.sun.shadow.needsUpdate=true;
