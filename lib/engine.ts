@@ -3,6 +3,7 @@ import { Capsule } from "three/addons/math/Capsule.js";
 import PF from "pathfinding";
 import { buildWorld, makeWeapon, makeBot, type World } from "./world";
 import { weapons, type MatchConfig, type GameState, type Weapon, type MapId } from "./arsenal";
+import { createShooterRenderer } from "./shooter-renderer";
 
 export const initialState:GameState={phase:"lobby",health:100,ammo:30,reserve:180,kills:0,deaths:0,time:180,weapon:"m4",reloading:false,reloadProgress:0,hit:false,hurt:false,notice:"",streak:0,score:0,grenades:2,aiming:false,radar:[],yaw:0,flying:false,c4:0,altitude:0};
 type Bot = ReturnType<typeof makeBot> & {hp:number;deadUntil:number;fireAt:number;path:number[][];planAt:number;index:number};
@@ -21,8 +22,8 @@ export class Shooter {
   private observer:ResizeObserver;private abort=new AbortController();private recoil=0;private touchMove={x:0,y:0};private onState:(s:GameState)=>void;
   constructor(private host:HTMLElement,config:MatchConfig,onState:(s:GameState)=>void){
     this.config=config;this.onState=onState;this.weapon=weapons.find(w=>w.id===config.weapon)!;
-    this.renderer=new T.WebGLRenderer({antialias:true,powerPreference:"high-performance"});
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));this.renderer.shadowMap.enabled=true;this.renderer.shadowMap.type=T.PCFSoftShadowMap;
+    const graphics=createShooterRenderer();this.renderer=graphics.renderer;
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio,graphics.reduced?1:1.5));this.renderer.shadowMap.enabled=!graphics.reduced;this.renderer.shadowMap.type=T.PCFSoftShadowMap;
     // Map geometry is static; keep its shadow map cached between frames.
     this.renderer.shadowMap.autoUpdate=false;this.renderer.shadowMap.needsUpdate=true;
     this.renderer.toneMapping=T.ACESFilmicToneMapping;this.renderer.toneMappingExposure=1.13;host.appendChild(this.renderer.domElement);
@@ -210,5 +211,5 @@ export class Shooter {
   private notice(text:string){this.state.notice=text;this.noticeUntil=this.elapsed+2;}
   private emit(){this.onState({...this.state,health:Math.ceil(this.state.health),reloading:!!this.reloadEnd,reloadProgress:this.reloadEnd?1-(this.reloadEnd-this.elapsed)/this.weapon.reload:0,hit:this.elapsed<this.hitUntil,hurt:this.elapsed<this.hurtUntil,notice:this.elapsed<this.noticeUntil?this.state.notice:"",aiming:this.aiming,yaw:this.yaw,radar:[{x:this.capsule.end.x,z:this.capsule.end.z,enemy:false},...this.bots.filter(b=>b.hp>0).map(b=>({x:b.group.position.x,z:b.group.position.z,enemy:true}))]});}
   private sound(frequency:number,duration:number,type:OscillatorType,volume:number){try{this.audio??=new AudioContext();void this.audio.resume();const osc=this.audio.createOscillator(),gain=this.audio.createGain();osc.type=type;osc.frequency.setValueAtTime(frequency,this.audio.currentTime);osc.frequency.exponentialRampToValueAtTime(35,this.audio.currentTime+duration);gain.gain.setValueAtTime(volume*this.config.volume,this.audio.currentTime);gain.gain.exponentialRampToValueAtTime(.001,this.audio.currentTime+duration);osc.connect(gain);gain.connect(this.audio.destination);osc.start();osc.stop(this.audio.currentTime+duration);}catch{}}
-  destroy(){cancelAnimationFrame(this.frame);this.abort.abort();this.observer.disconnect();if(document.pointerLockElement===this.renderer.domElement)document.exitPointerLock();this.clearEffects();this.bots.forEach(b=>this.disposeObject(b.group));this.disposeObject(this.gun);this.disposeWorld();void this.audio?.close();this.renderer.dispose();this.renderer.domElement.remove();}
+  destroy(){cancelAnimationFrame(this.frame);this.abort.abort();this.observer.disconnect();if(document.pointerLockElement===this.renderer.domElement)document.exitPointerLock();this.clearEffects();this.bots.forEach(b=>this.disposeObject(b.group));this.disposeObject(this.gun);this.disposeWorld();void this.audio?.close();this.renderer.domElement.remove();this.renderer.dispose();this.renderer.forceContextLoss();}
 }

@@ -17,16 +17,35 @@ const initial:GameState={phase:"lobby",health:100,ammo:30,reserve:180,kills:0,de
 export default function Game({playerName,signOut}:{playerName:string;signOut:string|null}){
   const host=useRef<HTMLDivElement>(null),engine=useRef<Shooter|null>(null);
   const [config,setConfig]=useState(defaultConfig),[state,setState]=useState(initial),[ready,setReady]=useState(false),[error,setError]=useState("");
+  const [attempt,setAttempt]=useState(0),[graphicsError,setGraphicsError]=useState(false);
+  const configRef=useRef(config);configRef.current=config;
   const [armory,setArmory]=useState(false),[settings,setSettings]=useState(false),[category,setCategory]=useState("Sturmgewehre");
   const [touch,setTouch]=useState(false),[stick,setStick]=useState({x:0,y:0});
   const lookPointer=useRef<{x:number;y:number;id:number}|null>(null),movePointer=useRef<{x:number;y:number;id:number}|null>(null);
   useEffect(()=>{
-    let cancelled=false;
     setTouch(matchMedia("(pointer:coarse)").matches);
     try{const saved=JSON.parse(localStorage.getItem("strikepoint-settings")||"null");if(saved&&Number.isFinite(saved.sensitivity)&&Number.isFinite(saved.volume))setConfig(c=>({...c,sensitivity:Math.max(.3,Math.min(2.5,saved.sensitivity)),volume:Math.max(0,Math.min(1,saved.volume))}));}catch{}
-    import("@/lib/engine").then(({Shooter})=>{if(cancelled||!host.current)return;try{engine.current=new Shooter(host.current,{...defaultConfig},setState);setReady(true);}catch(e){setError(e instanceof Error?e.message:"WebGL konnte nicht gestartet werden.");}}).catch(()=>setError("Die Spielengine konnte nicht geladen werden. Bitte neu laden."));
-    return()=>{cancelled=true;engine.current?.destroy();engine.current=null;};
   },[]);
+  useEffect(()=>{
+    let cancelled=false;const container=host.current;
+    setReady(false);setError("");setGraphicsError(false);setState(initial);
+    const contextLost=(event:Event)=>{
+      event.preventDefault();engine.current?.destroy();engine.current=null;
+      setReady(false);setState(initial);setGraphicsError(true);
+      setError("Die Verbindung zur 3D-Grafik wurde unterbrochen. Bitte erneut versuchen.");
+    };
+    container?.addEventListener("webglcontextlost",contextLost,true);
+    import("@/lib/engine").then(({Shooter})=>{
+      if(cancelled||!container)return;
+      try{engine.current=new Shooter(container,{...configRef.current},setState);setReady(true);}
+      catch(cause){
+        console.error("STRIKEPOINT initialization failed:",cause);container.replaceChildren();
+        const unavailable=cause instanceof Error&&cause.name==="WebGLUnavailableError";
+        setGraphicsError(unavailable);setError(unavailable?"WebGL 2 ist nicht verfuegbar. STRIKEPOINT kann die 3D-Grafik nicht starten.":"Das Spiel konnte nicht gestartet werden. Bitte erneut versuchen.");
+      }
+    }).catch(cause=>{if(cancelled)return;console.error("STRIKEPOINT module loading failed:",cause);setError("Die Spielengine konnte nicht geladen werden. Bitte erneut versuchen.");});
+    return()=>{cancelled=true;container?.removeEventListener("webglcontextlost",contextLost,true);engine.current?.destroy();engine.current=null;};
+  },[attempt]);
   useEffect(()=>{engine.current?.setMap(config.map);},[config.map]);
   useEffect(()=>{try{localStorage.setItem("strikepoint-settings",JSON.stringify({sensitivity:config.sensitivity,volume:config.volume}));}catch{}if(engine.current){engine.current.config.sensitivity=config.sensitivity;engine.current.config.volume=config.volume;}},[config.sensitivity,config.volume]);
   useEffect(()=>{
@@ -67,11 +86,11 @@ export default function Game({playerName,signOut}:{playerName:string;signOut:str
           <label className="field-label">SEKUNDAERWAFFE</label><Select value={config.sidearm} onValueChange={v=>setConfig(c=>({...c,sidearm:v}))}><SelectTrigger className="game-select" aria-label="Sekundaerwaffe"><SelectValue/></SelectTrigger><SelectContent>{weapons.filter(w=>w.category==="Pistolen").map(w=><SelectItem value={w.id} key={w.id}>{w.name}</SelectItem>)}</SelectContent></Select>
           <label className="field-label">BOT-STAERKE</label><Select value={config.difficulty} onValueChange={v=>setConfig(c=>({...c,difficulty:v as MatchConfig["difficulty"]}))}><SelectTrigger className="game-select" aria-label="Bot-Staerke"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="recruit">Rekrut</SelectItem><SelectItem value="regular">Soldat</SelectItem><SelectItem value="veteran">Veteran</SelectItem></SelectContent></Select>
           <div className="win-condition"><Target size={17}/><span>25 Eliminierungen <span>oder 3 Minuten</span></span></div>
-          <button className="deploy-button" disabled={!ready||!!error} onClick={start}><Play size={20} fill="currentColor"/>{ready?"EINSATZ STARTEN":"INITIALISIERUNG..."}</button>
-          {error&&<p role="alert" className="error">{error}</p>}
+          <button className="deploy-button" disabled={!ready&&!error} onClick={error?()=>setAttempt(n=>n+1):start}>{error?<RotateCcw size={20}/>:<Play size={20} fill="currentColor"/>}{error?"ERNEUT VERSUCHEN":ready?"EINSATZ STARTEN":"INITIALISIERUNG..."}</button>
+          {error&&<div className="graphics-error"><p role="alert" className="error">{error}</p>{graphicsError&&<details><summary>Brave: Grafik pruefen</summary><p>Unter <code>brave://settings/system</code> die Grafikbeschleunigung aktivieren und Brave neu starten.</p><p>Falls es weiterhin nicht klappt: Unter <code>brave://gpu</code> den Status von WebGL2 und „Problems Detected“ pruefen.</p><Link href="/pink-pedal">Pink Pedal im 2D-Modus spielen</Link></details>}</div>}
         </aside>
       </section>
-      <footer className="lobby-footer"><span><span className="status-dot"/> {ready?"BEREIT FUER DEN EINSATZ":"ENGINE STARTET"}</span><span>CLASSIC ARSENAL / 2007</span><button className="icon-button" title="Vollbild" onClick={fullscreen}><Maximize size={17}/></button></footer>
+      <footer className="lobby-footer"><span role="status"><span className="status-dot"/> {error?"START FEHLGESCHLAGEN":ready?"BEREIT FUER DEN EINSATZ":"ENGINE STARTET"}</span><span>CLASSIC ARSENAL / 2007</span><button className="icon-button" title="Vollbild" onClick={fullscreen}><Maximize size={17}/></button></footer>
     </>}
     {state.phase!=="lobby"&&<>
       <div className={`damage-overlay ${state.hurt?"visible":""}`}/>

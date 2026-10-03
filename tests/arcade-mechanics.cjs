@@ -11,8 +11,23 @@ const { weapons } = require('../lib/arsenal.ts');
 const { makeBot, buildWorld } = require('../lib/world.ts');
 const { PinkEngine, pedalInitial, makeCyclist } = require('../lib/pink-engine.ts');
 const { ParkCanvasRenderer, createParkRenderer } = require('../lib/park-canvas-renderer.ts');
+const { createShooterRenderer, WebGLUnavailableError } = require('../lib/shooter-renderer.ts');
 global.document = {exitPointerLock(){},createElement:()=>({width:0,height:0,getContext:()=>({fillRect(){},strokeRect(){},fillText(){}})})};
 global.requestAnimationFrame = () => 1;
+
+{
+  const Original=T.WebGLRenderer, calls=[];
+  try{
+    T.WebGLRenderer=class {constructor(options){calls.push(options);}};
+    assert.equal(createShooterRenderer().reduced,false);assert.equal(calls.length,1);assert.equal(calls[0].powerPreference,'default');
+    calls.length=0;T.WebGLRenderer=class {constructor(options){calls.push(options);if(options.antialias)throw new Error('MSAA unavailable');}};
+    assert.equal(createShooterRenderer().reduced,true);assert.equal(calls.length,2);assert.equal(calls[1].antialias,false);assert.equal(calls[1].depth,true);
+    calls.length=0;const failure=new Error('Error creating WebGL context.');
+    T.WebGLRenderer=class {constructor(options){calls.push(options);throw failure;}};
+    assert.throws(()=>createShooterRenderer(),error=>error instanceof WebGLUnavailableError&&error.cause===failure);assert.equal(calls.length,2);
+    console.log('PASS: default GPU selection, reduced graphics retry and explicit unavailable-WebGL error');
+  }finally{T.WebGLRenderer=Original;}
+}
 
 function shooter(){
   const e=Object.create(Shooter.prototype), scene=new T.Scene();
@@ -21,6 +36,13 @@ function shooter(){
   e.camera.position.set(0,1.64,6);e.camera.updateMatrixWorld(true);return e;
 }
 function bot(e,x=0,z=0){const model=makeBot(0),b={...model,hp:100,deadUntil:0,index:0};model.group.position.set(x,0,z);model.group.traverse(o=>o.userData.bot=0);e.scene.add(model.group);e.bots=[b];e.scene.updateMatrixWorld(true);return b;}
+{
+  const e=shooter(),events=[],previous=global.cancelAnimationFrame;
+  global.cancelAnimationFrame=()=>events.push('cancel');
+  Object.assign(e,{abort:{abort:()=>events.push('listeners')},observer:{disconnect:()=>events.push('resize')},renderer:{domElement:{remove:()=>events.push('remove')},dispose:()=>events.push('dispose'),forceContextLoss:()=>events.push('release')}});
+  e.world.group=new T.Group();
+  try{e.destroy();assert.deepEqual(events,['cancel','listeners','resize','remove','dispose','release']);}finally{if(previous===undefined)delete global.cancelAnimationFrame;else global.cancelAnimationFrame=previous;}
+}
 {
   const e=shooter();for(let i=0;i<90;i++){e.elapsed+=.1;e.tryShoot(true);}assert.equal(e.state.ammo,30);assert.equal(e.slots[0].ammo,30);assert.equal(e.reloadEnd,0);e.reload();assert.equal(e.reloadEnd,0);
 }

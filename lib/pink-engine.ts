@@ -141,5 +141,5 @@ export class PinkEngine {
    this.renderer.render(this.scene,this.camera);this.accumulator+=dt;if(this.accumulator>.09){this.accumulator=0;this.emit();}
  }
  private emit(){this.onState({...this.state,message:this.clock<this.noteUntil?this.state.message:"",quote:this.clock<this.quoteUntil?this.state.quote:""});}
- destroy(){cancelAnimationFrame(this.frame);this.abort.abort();this.observer.disconnect();this.clearFlights();this.stopVoice();disposeScene(this.root);this.riders.forEach(r=>disposeScene(r.group));this.bursts.forEach(b=>disposeScene(b.group));void this.audio?.close();this.renderer.dispose();this.renderer.domElement.remove();}
+ destroy(){cancelAnimationFrame(this.frame);this.abort.abort();this.observer.disconnect();this.clearFlights();this.stopVoice();disposeScene(this.root);this.riders.forEach(r=>disposeScene(r.group));this.bursts.forEach(b=>disposeScene(b.group));void this.audio?.close();this.renderer.domElement.remove();this.renderer.dispose();if(this.renderer instanceof T.WebGLRenderer)this.renderer.forceContextLoss();}
 }
