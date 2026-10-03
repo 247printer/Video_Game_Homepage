@@ -10,6 +10,7 @@ const { Shooter, initialState } = require('../lib/engine.ts');
 const { weapons } = require('../lib/arsenal.ts');
 const { makeBot, buildWorld } = require('../lib/world.ts');
 const { PinkEngine, pedalInitial, makeCyclist } = require('../lib/pink-engine.ts');
+const { ParkCanvasRenderer, createParkRenderer } = require('../lib/park-canvas-renderer.ts');
 global.document = {exitPointerLock(){},createElement:()=>({width:0,height:0,getContext:()=>({fillRect(){},strokeRect(){},fillText(){}})})};
 global.requestAnimationFrame = () => 1;
 
@@ -56,6 +57,33 @@ function bot(e,x=0,z=0){const model=makeBot(0),b={...model,hp:100,deadUntil:0,in
   e.start();assert.equal(e.state.score,0);assert.equal(e.state.weapon,'schnitzel');e.pause();const before=e.clock;e.tick(1000);assert.equal(e.clock,before);
 }
 console.log('PASS: infinite ammo, lethal head/visor hits, cover, RPG, grenade fuse, C4, flight limits, climbing, pause, schnitzel flight/scoring, captions and weapon modes');
+{
+  const savedDocument=global.document, savedWarn=console.warn, savedError=console.error;
+  const globalKeys=['window','ResizeObserver','devicePixelRatio','cancelAnimationFrame'],savedGlobals=Object.fromEntries(globalKeys.map(key=>[key,global[key]]));
+  let paints=0, webglAttempts=0;
+  const context=new Proxy({}, {get:(target,key)=>target[key]??(()=>{paints++;})});
+  const canvas=()=>({width:0,height:0,style:{},dataset:{},remove(){},addEventListener(){},removeEventListener(){},setAttribute(){},getBoundingClientRect:()=>({left:20,top:10,width:640,height:480}),getContext(type){if(type==='2d')return context;webglAttempts++;return null;}});
+  global.document={...savedDocument,createElement:canvas,createElementNS:canvas,addEventListener(){}};
+  global.window={addEventListener(){}};global.ResizeObserver=class{observe(){}disconnect(){}};global.devicePixelRatio=2;global.cancelAnimationFrame=()=>{};
+  console.warn=()=>{};console.error=()=>{};
+  try{
+    const renderer=createParkRenderer();assert.ok(renderer instanceof ParkCanvasRenderer);assert.ok(webglAttempts>0);assert.equal(renderer.domElement.dataset.renderer,'canvas2d');
+    webglAttempts=0;const forced=createParkRenderer(true);assert.equal(webglAttempts,0);forced.dispose();
+    const initialized=new PinkEngine({clientWidth:640,clientHeight:480,appendChild(){}},()=>{});
+    assert.ok(initialized.renderer instanceof ParkCanvasRenderer);assert.equal(initialized.riders.length,6);initialized.tick(100);initialized.destroy();
+    renderer.setPixelRatio(2);renderer.setSize(640,480);assert.equal(renderer.domElement.width,1280);
+    const e=Object.create(PinkEngine.prototype),model=makeCyclist(0),r={...model,active:true,lane:0,speed:2,direction:1,returnAt:0,points:75,spin:0};
+    model.group.traverse(o=>o.userData.rider=0);
+    Object.assign(e,{scene:new T.Scene(),camera:new T.PerspectiveCamera(44,4/3,.1,100),renderer,state:{...pedalInitial,phase:'playing',voices:false},clock:0,quoteUntil:0,voiceReady:0,cryReady:0,reloadAt:0,lastShot:-1,noteUntil:0,flights:[],bursts:[],riders:[r],last:0,accumulator:0,onState(){},tone(){}});
+    e.scene.add(model.group);e.camera.position.set(0,9,23);e.camera.lookAt(0,1.8,0);renderer.render(e.scene,e.camera);assert.ok(paints>100);
+    const p=new T.Vector3(0,2,0).project(e.camera),x=(p.x+1)*320+20,y=(1-p.y)*240+10;
+    assert.equal(renderer.hitTest(x,y).object,model.group);assert.equal(renderer.hitTest(21,11),undefined);
+    e.shoot(x,y);assert.equal(e.flights.length,1);for(let i=1;i<=5;i++)e.tick(i*100);assert.equal(e.state.hits,1);assert.equal(e.state.score,75);
+    model.group.visible=false;assert.equal(renderer.hitTest(x,y),undefined);renderer.render(e.scene,e.camera);assert.equal(renderer.hitTest(x,y),undefined);
+    renderer.dispose();assert.equal(renderer.domElement.width,1);
+    console.log('PASS: unavailable WebGL fallback, forced 2D, drawing commands, scaled hit tests, 2D schnitzel scoring and cleanup');
+  }finally{global.document=savedDocument;console.warn=savedWarn;console.error=savedError;for(const key of globalKeys){if(savedGlobals[key]===undefined)delete global[key];else global[key]=savedGlobals[key];}}
+}
 for(const map of ['dockyard','relay']){
   const scene=new T.Scene(),world=buildWorld(scene,map);
   for(const p of world.spawns){const capsule=new Capsule(p.clone().add(new T.Vector3(0,.4,0)),p.clone().add(new T.Vector3(0,1.55,0)),.35);assert.equal(world.octree.capsuleIntersect(capsule),false,`${map}: clear spawn ${p.toArray()}`);}

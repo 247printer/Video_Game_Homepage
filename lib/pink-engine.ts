@@ -1,4 +1,5 @@
 import * as T from "three";
+import { createParkRenderer, ParkCanvasRenderer } from "./park-canvas-renderer";
 
 export type PedalState={phase:"ready"|"playing"|"paused"|"finished";score:number;time:number;ammo:number;hits:number;shots:number;combo:number;reloading:boolean;message:string;weapon:"paintball"|"schnitzel";voices:boolean;quote:string};
 export const pedalInitial:PedalState={phase:"ready",score:0,time:90,ammo:6,hits:0,shots:0,combo:0,reloading:false,message:"",weapon:"schnitzel",voices:true,quote:""};
@@ -67,16 +68,16 @@ type Rider=ReturnType<typeof makeCyclist>&{lane:number;speed:number;direction:nu
 type Burst={group:T.Group;age:number;velocities:T.Vector3[]};
 type SchnitzelFlight={group:T.Group;from:T.Vector3;to:T.Vector3;age:number;rider:Rider|null};
 function makeSchnitzel(){
- const group=new T.Group();const crust=ball(group,0,0,0,.4,0xd49637,1.4,.8,.16);crust.rotation.z=.2;
+ const group=new T.Group();group.userData.renderKind="schnitzel";const crust=ball(group,0,0,0,.4,0xd49637,1.4,.8,.16);crust.rotation.z=.2;
  for(let i=0;i<24;i++){const a=i*2.4,r=.1+((i*7)%11)/30;ball(group,Math.cos(a)*r*1.3,Math.sin(a)*r*.8,.055,.027,i%2?0xf5ce70:0x9e6926);}
  const lemon=new T.Mesh(new T.CylinderGeometry(.13,.13,.04,12,1,false,0,Math.PI),material(0xf4dc58));lemon.rotation.x=Math.PI/2;lemon.position.set(.23,.19,.07);group.add(lemon);return group;
 }
 export class PinkEngine {
- renderer:T.WebGLRenderer;scene=new T.Scene();camera=new T.PerspectiveCamera(44,1,.1,100);state={...pedalInitial};riders:Rider[]=[];
+ renderer:T.WebGLRenderer|ParkCanvasRenderer;scene=new T.Scene();camera=new T.PerspectiveCamera(44,1,.1,100);state={...pedalInitial};riders:Rider[]=[];
   private root:T.Group;private observer:ResizeObserver;private frame=0;private last=0;private clock=0;private accumulator=0;private reloadAt=0;private noteUntil=0;private lastShot=-1;private bursts:Burst[]=[];private abort=new AbortController();private audio:AudioContext|null=null;
  private flights:SchnitzelFlight[]=[];private quoteUntil=0;private voiceReady=0;private cryReady=0;
- constructor(private host:HTMLElement,private onState:(state:PedalState)=>void){
-   this.renderer=new T.WebGLRenderer({antialias:true,alpha:false});this.renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));this.renderer.toneMapping=T.ACESFilmicToneMapping;this.renderer.toneMappingExposure=1.15;host.appendChild(this.renderer.domElement);this.renderer.domElement.setAttribute("aria-label","Pink Pedal Spielfeld");
+ constructor(private host:HTMLElement,private onState:(state:PedalState)=>void,force2d=false){
+   this.renderer=createParkRenderer(force2d);this.renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));host.appendChild(this.renderer.domElement);this.renderer.domElement.setAttribute("aria-label","Pink Pedal Spielfeld");
    this.root=buildPark(this.scene);this.camera.position.set(0,9,23);this.camera.lookAt(0,1.8,0);
    for(let i=0;i<6;i++){const model=makeCyclist(i),r:Rider={...model,lane:i%3,speed:2+i*.28,direction:i%2?1:-1,active:true,returnAt:0,points:(3-i%3)*25,spin:0};r.group.position.set(-12+i*4,0,[-6,0,6][r.lane]);r.group.rotation.y=r.direction===1?0:Math.PI;r.group.traverse(o=>{o.userData.rider=i;});this.scene.add(r.group);this.riders.push(r);}
    this.observer=new ResizeObserver(()=>this.resize());this.observer.observe(host);this.resize();
@@ -98,7 +99,7 @@ export class PinkEngine {
    if(this.state.phase!=="playing"||this.reloadAt||this.clock-this.lastShot<(this.state.weapon==="schnitzel"?.32:.14))return;
    if(this.state.weapon==="paintball"&&!this.state.ammo){this.reload();return;}this.lastShot=this.clock;if(this.state.weapon==="paintball")this.state.ammo--;this.state.shots++;
    const rect=this.renderer.domElement.getBoundingClientRect(),point=new T.Vector2((x-rect.left)/rect.width*2-1,-(y-rect.top)/rect.height*2+1),ray=new T.Raycaster();ray.setFromCamera(point,this.camera);this.scene.updateMatrixWorld(true);
-   const hit=ray.intersectObjects(this.riders.filter(r=>r.active).map(r=>r.group),true)[0];
+   const hit=this.renderer instanceof ParkCanvasRenderer?this.renderer.hitTest(x,y):ray.intersectObjects(this.riders.filter(r=>r.active).map(r=>r.group),true)[0];
    if(this.state.weapon==="schnitzel"){
      const rider=hit?this.riders[hit.object.userData.rider]:null,from=this.camera.position.clone().add(new T.Vector3(.5,-.8,-1)),to=hit?hit.point.clone():ray.ray.at(28,new T.Vector3());
      if(rider)to.x+=rider.speed*rider.direction*.38;
@@ -127,7 +128,7 @@ export class PinkEngine {
    }catch{/* Captions and the Web Audio yelp remain available. */}
  }
  private clearFlights(){this.flights.forEach(f=>disposeScene(f.group));this.flights=[];}
- private burst(at:T.Vector3){const group=new T.Group(),velocities:T.Vector3[]=[];for(let i=0;i<14;i++){const m=new T.Mesh(new T.BoxGeometry(.13,.13,.06),material([0xff64ac,0xffec7f,0x65d9d1][i%3]));group.add(m);velocities.push(v((Math.random()-.5)*6,2+Math.random()*4,(Math.random()-.5)*3));}group.position.copy(at);this.scene.add(group);this.bursts.push({group,age:0,velocities});}
+ private burst(at:T.Vector3){const group=new T.Group(),velocities:T.Vector3[]=[];group.userData.renderKind="confetti";for(let i=0;i<14;i++){const m=new T.Mesh(new T.BoxGeometry(.13,.13,.06),material([0xff64ac,0xffec7f,0x65d9d1][i%3]));group.add(m);velocities.push(v((Math.random()-.5)*6,2+Math.random()*4,(Math.random()-.5)*3));}group.position.copy(at);this.scene.add(group);this.bursts.push({group,age:0,velocities});}
  private tone(hz:number,duration:number){try{this.audio??=new AudioContext();void this.audio.resume();const osc=this.audio.createOscillator(),gain=this.audio.createGain();osc.type="sine";osc.frequency.setValueAtTime(hz,this.audio.currentTime);gain.gain.setValueAtTime(.08,this.audio.currentTime);gain.gain.exponentialRampToValueAtTime(.001,this.audio.currentTime+duration);osc.connect(gain);gain.connect(this.audio.destination);osc.start();osc.stop(this.audio.currentTime+duration);}catch{}}
  private tick(now:number){
    this.frame=requestAnimationFrame(t=>this.tick(t));const dt=Math.min(.15,(now-this.last)/1000||.016);this.last=now;

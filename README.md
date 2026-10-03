@@ -12,6 +12,8 @@ The environments include textured paving, container doors and locks, cargo label
 
 ## PINK PEDAL (`/pink-pedal`)
 
+If WebGL is unavailable, Pink Pedal automatically switches to a Canvas 2D park renderer. The same round, moving targets, weapons, scores and voices remain playable. The start screen also offers a manual 2D mode and a retry button. A lost WebGL context restarts in 2D. STRIKEPOINT still requires WebGL for its first-person 3D world.
+
 An original arcade shooting gallery with adult, round-bodied cartoon e-bike riders wearing pink dresses. Three lanes award 75, 50 and 25 points per hit. Consecutive hits increase a multiplier up to 4x; a miss resets the streak. Each round lasts 90 seconds. Six paint shots per magazine, with a 1.1-second reload. Hits create colorful confetti, without gore.
 
 - Choose Paintball or Schnitzel, then click or tap a rider. Schnitzels have unlimited supply and an animated flight before the hit is scored.
